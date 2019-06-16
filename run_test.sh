@@ -1,2 +1,26 @@
 #!/bin/sh
-python3 -m pysc2.bin.agent --map Simple64 --render True --save_replay True --agent pysc2.agents.yiren.idle_agent.IdleAgent1 --agent_race terran --agent2 pysc2.agents.yiren.idle_agent.IdleAgent2 --agent2_race zerg
+### YearZero(紀年起源)
+# MAP=YearZero
+### PortAleksander(亞歷克桑德港)
+# MAP=PortAleksander
+### NewRepugnancy(新生衝突點)
+# MAP=NewRepugnancy
+### KingsCove(國王海灣)
+# MAP=KingsCove
+### KairosJunction(凱羅斯交會點)
+# MAP=KairosJunction
+### CyberForest(電子叢林)
+# MAP=CyberForest
+### Automaton(自動化)
+# MAP=Automaton
+MAP=Simple64
+AGENT1_CLS=pysc2.agents.yiren.idle_agent.IdleAgent1
+#AGENT1_RACE=protoss
+AGENT1_RACE=terran
+#AGENT1_RACE=zerg
+AGENT2_CLS=pysc2.agents.yiren.idle_agent.IdleAgent2
+#AGENT2_RACE=protoss
+#AGENT2_RACE=terran
+AGENT2_RACE=zerg
+
+python3 -m pysc2.bin.agent --map ${MAP} --render True --save_replay True --agent ${AGENT1_CLS} --agent_race ${AGENT1_RACE} --agent2 ${AGENT2_CLS} --agent2_race ${AGENT2_RACE}
