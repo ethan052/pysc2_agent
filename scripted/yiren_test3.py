@@ -994,7 +994,7 @@ class GeneralAgentCore(object):
     castle_screen_list = self._get_my_castle_screen(obs)
     castle_screen = castle_screen_list[0][0]
     castle_info_list[0][0][1] = castle_screen
-    owner = obs.observation.player.player_id    
+    owner = obs.observation.player.player_id
     self._locations[owner] = {}    
     self._locations[owner][self._myCastle] = [castle_info_list]
     self._structures[self._current_camera] = {}
