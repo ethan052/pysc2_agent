@@ -1,8 +1,10 @@
 #!/bin/sh
+### Simple64(簡單64)
+MAP=Simple64
 ### YearZero(紀年起源)
 # MAP=YearZero
 ### PortAleksander(亞歷克桑德港)
-# MAP=PortAleksander
+MAP=PortAleksander
 ### NewRepugnancy(新生衝突點)
 # MAP=NewRepugnancy
 ### KingsCove(國王海灣)
@@ -13,17 +15,17 @@
 # MAP=CyberForest
 ### Automaton(自動化)
 # MAP=Automaton
-### Simple64(簡單64)
-MAP=Simple64
+
 #AGENT1_CLS=pysc2.agents.yiren.idle_agent.IdleAgent1
-#AGENT1_CLS=pysc2.agents.yiren.yiren_template.PracticeRandomRaceAgent
-#AGENT1_RACE=random
+AGENT1_CLS=pysc2.agents.yiren.yiren_template.PracticeRandomRaceAgent
+AGENT1_RACE=random
+
 #AGENT1_CLS=pysc2.agents.yiren.yiren_template.PracticeProtossAgent
 #AGENT1_RACE=protoss
-#AGENT1_CLS=pysc2.agents.yiren.yiren_template.PracticeTerranAgent
-#AGENT1_RACE=terran
-AGENT1_CLS=pysc2.agents.yiren.yiren_template.PracticeZergAgent
-AGENT1_RACE=zerg
+AGENT1_CLS=pysc2.agents.yiren.yiren_template.PracticeTerranAgent
+AGENT1_RACE=terran
+#AGENT1_CLS=pysc2.agents.yiren.yiren_template.PracticeZergAgent
+#AGENT1_RACE=zerg
 
 AGENT2_CLS=pysc2.agents.yiren.idle_agent.IdleAgent2
 #AGENT2_RACE=protoss
