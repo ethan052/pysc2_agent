@@ -45,37 +45,37 @@ DATA[units.Protoss.Mothership] = {'mineral_cost':400, 'vespene_cost':400, 'food_
 
 ## 神族建築
 ### 星核
-DATA[units.Protoss.Nexus] = {'mineral_cost':400, 'vespene_cost':0, 'food_required': 0, 'build_time': 71, 'square_length':5}
+DATA[units.Protoss.Nexus] = {'mineral_cost':400, 'vespene_cost':0, 'food_required': 0, 'build_time': 71, 'grid_count':5}
 ### 瓦斯處理廠
-DATA[units.Protoss.Assimilator] = {'mineral_cost':75, 'vespene_cost':0, 'food_required': 0, 'build_time': 21, 'square_length':3}
+DATA[units.Protoss.Assimilator] = {'mineral_cost':75, 'vespene_cost':0, 'food_required': 0, 'build_time': 21, 'grid_count':3}
 ### 水晶塔
-DATA[units.Protoss.Pylon] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 18, 'square_length':2}
+DATA[units.Protoss.Pylon] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 18, 'grid_count':2}
 ### 傳送門
-DATA[units.Protoss.Gateway] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 46, 'square_length':3}
+DATA[units.Protoss.Gateway] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 46, 'grid_count':3}
 ### 空間之門
-DATA[units.Protoss.WarpGate] = {'mineral_cost':0, 'vespene_cost':0, 'food_required': 0, 'build_time': 7, 'square_length':3}
+DATA[units.Protoss.WarpGate] = {'mineral_cost':0, 'vespene_cost':0, 'food_required': 0, 'build_time': 7, 'grid_count':3}
 ### 冶煉廠
-DATA[units.Protoss.Forge] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 32, 'square_length':3}
+DATA[units.Protoss.Forge] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 32, 'grid_count':3}
 ### 光子加農砲
-DATA[units.Protoss.PhotonCannon] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 29, 'square_length':2}
+DATA[units.Protoss.PhotonCannon] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 29, 'grid_count':2}
 ### 機械控制核心
-DATA[units.Protoss.CyberneticsCore] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 36, 'square_length':3}
+DATA[units.Protoss.CyberneticsCore] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 36, 'grid_count':3}
 ### 護盾充能器
-DATA[units.Protoss.ShieldBattery] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 29, 'square_length':2}
+DATA[units.Protoss.ShieldBattery] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 29, 'grid_count':2}
 ### 機械製造廠
-DATA[units.Protoss.RoboticsFacility] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 46, 'square_length':3}
+DATA[units.Protoss.RoboticsFacility] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 46, 'grid_count':3}
 ### 機械研究所
-DATA[units.Protoss.RoboticsBay] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 46, 'square_length':3}
+DATA[units.Protoss.RoboticsBay] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 46, 'grid_count':3}
 ### 星際之門
-DATA[units.Protoss.Stargate] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 43, 'square_length':3}
+DATA[units.Protoss.Stargate] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 43, 'grid_count':3}
 ### 艦隊導航台
-DATA[units.Protoss.FleetBeacon] = {'mineral_cost':300, 'vespene_cost':200, 'food_required': 0, 'build_time': 43, 'square_length':3}
+DATA[units.Protoss.FleetBeacon] = {'mineral_cost':300, 'vespene_cost':200, 'food_required': 0, 'build_time': 43, 'grid_count':3}
 ### 暮光議會
-DATA[units.Protoss.TwilightCouncil] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 36, 'square_length':3}
+DATA[units.Protoss.TwilightCouncil] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 36, 'grid_count':3}
 ### 聖堂文庫
-DATA[units.Protoss.TemplarArchive] = {'mineral_cost':150, 'vespene_cost':200, 'food_required': 0, 'build_time': 36, 'square_length':3}
+DATA[units.Protoss.TemplarArchive] = {'mineral_cost':150, 'vespene_cost':200, 'food_required': 0, 'build_time': 36, 'grid_count':3}
 ### 黑暗神殿
-DATA[units.Protoss.DarkShrine] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 71, 'square_length':2}
+DATA[units.Protoss.DarkShrine] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 71, 'grid_count':2}
 
 
 ## 人類兵種
@@ -117,47 +117,47 @@ DATA[units.Terran.Battlecruiser] = {'mineral_cost':400, 'vespene_cost':300, 'foo
 
 ## 人類建築
 ### 指揮中心
-DATA[units.Terran.CommandCenter] = {'mineral_cost':400, 'vespene_cost':0, 'food_required': 0, 'build_time': 71, 'square_length':5}
+DATA[units.Terran.CommandCenter] = {'mineral_cost':400, 'vespene_cost':0, 'food_required': 0, 'build_time': 71, 'grid_count':5}
 ### 星軌指揮總部
-DATA[units.Terran.OrbitalCommand] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 25, 'square_length':5}
+DATA[units.Terran.OrbitalCommand] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 25, 'grid_count':5}
 ### 行星要塞
-DATA[units.Terran.PlanetaryFortress] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 36, 'square_length':5}
+DATA[units.Terran.PlanetaryFortress] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 36, 'grid_count':5}
 ### 瓦斯精煉廠
-DATA[units.Terran.Refinery] = {'mineral_cost':75, 'vespene_cost':0, 'food_required': 0, 'build_time': 21, 'square_length':3}
+DATA[units.Terran.Refinery] = {'mineral_cost':75, 'vespene_cost':0, 'food_required': 0, 'build_time': 21, 'grid_count':3}
 ### 補給站
-DATA[units.Terran.SupplyDepot] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 21, 'square_length':2}
+DATA[units.Terran.SupplyDepot] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 21, 'grid_count':2}
 ### 科技實驗室
-DATA[units.Terran.TechLab] = {'mineral_cost':50, 'vespene_cost':25, 'food_required': 0, 'build_time': 18, 'square_length':2}
+DATA[units.Terran.TechLab] = {'mineral_cost':50, 'vespene_cost':25, 'food_required': 0, 'build_time': 18, 'grid_count':2}
 DATA[units.Terran.BarracksTechLab] = DATA[units.Terran.TechLab]
 DATA[units.Terran.FactoryTechLab] = DATA[units.Terran.TechLab]
 DATA[units.Terran.StarportTechLab] = DATA[units.Terran.TechLab]
-DATA[units.Terran.TechLab] = {'mineral_cost':0, 'vespene_cost':0, 'food_required': 0, 'build_time': 0, 'square_length':2}
+DATA[units.Terran.TechLab] = {'mineral_cost':0, 'vespene_cost':0, 'food_required': 0, 'build_time': 0, 'grid_count':2}
 ### 反應爐
-DATA[units.Terran.Reactor] = {'mineral_cost':50, 'vespene_cost':50, 'food_required': 0, 'build_time': 36, 'square_length':2}
+DATA[units.Terran.Reactor] = {'mineral_cost':50, 'vespene_cost':50, 'food_required': 0, 'build_time': 36, 'grid_count':2}
 DATA[units.Terran.BarracksReactor] = DATA[units.Terran.Reactor]
 DATA[units.Terran.FactoryReactor] = DATA[units.Terran.Reactor]
 DATA[units.Terran.StarportReactor] = DATA[units.Terran.Reactor]
-DATA[units.Terran.Reactor] = {'mineral_cost':0, 'vespene_cost':0, 'food_required': 0, 'build_time': 0, 'square_length':2}
+DATA[units.Terran.Reactor] = {'mineral_cost':0, 'vespene_cost':0, 'food_required': 0, 'build_time': 0, 'grid_count':2}
 ### 兵營
-DATA[units.Terran.Barracks] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 46, 'square_length':3}
+DATA[units.Terran.Barracks] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 46, 'grid_count':3}
 ### 碉堡
-DATA[units.Terran.Bunker] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 29, 'square_length':3}
+DATA[units.Terran.Bunker] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 29, 'grid_count':3}
 ### 電機工程所
-DATA[units.Terran.EngineeringBay] = {'mineral_cost':125, 'vespene_cost':0, 'food_required': 0, 'build_time': 25, 'square_length':3}
+DATA[units.Terran.EngineeringBay] = {'mineral_cost':125, 'vespene_cost':0, 'food_required': 0, 'build_time': 25, 'grid_count':3}
 ### 感應塔
-DATA[units.Terran.SensorTower] = {'mineral_cost':125, 'vespene_cost':100, 'food_required': 0, 'build_time': 18, 'square_length':1}
+DATA[units.Terran.SensorTower] = {'mineral_cost':125, 'vespene_cost':100, 'food_required': 0, 'build_time': 18, 'grid_count':1}
 ### 飛彈砲台
-DATA[units.Terran.MissileTurret] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 18, 'square_length':2}
+DATA[units.Terran.MissileTurret] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 18, 'grid_count':2}
 ### 軍工廠
-DATA[units.Terran.Factory] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 43, 'square_length':3}
+DATA[units.Terran.Factory] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 43, 'grid_count':3}
 ### 兵工廠
-DATA[units.Terran.Armory] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 46, 'square_length':3}
+DATA[units.Terran.Armory] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 46, 'grid_count':3}
 ### 星際港
-DATA[units.Terran.Starport] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 36, 'square_length':3}
+DATA[units.Terran.Starport] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 36, 'grid_count':3}
 ### 核融合核心
-DATA[units.Terran.FusionCore] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 46, 'square_length':3}
+DATA[units.Terran.FusionCore] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 46, 'grid_count':3}
 ### 幽靈特務學院
-DATA[units.Terran.GhostAcademy] = {'mineral_cost':150, 'vespene_cost':50, 'food_required': 0, 'build_time': 29, 'square_length':3}
+DATA[units.Terran.GhostAcademy] = {'mineral_cost':150, 'vespene_cost':50, 'food_required': 0, 'build_time': 29, 'grid_count':3}
 
 
 
@@ -204,40 +204,40 @@ DATA[units.Zerg.Ultralisk] = {'mineral_cost':300, 'vespene_cost':200, 'food_requ
 
 ## 蟲族建築
 ### 孵化所
-DATA[units.Zerg.Hatchery] = {'mineral_cost':300, 'vespene_cost':0, 'food_required': 0, 'build_time': 71, 'square_length':5}
+DATA[units.Zerg.Hatchery] = {'mineral_cost':300, 'vespene_cost':0, 'food_required': 0, 'build_time': 71, 'grid_count':5}
 ### 蟲穴
-DATA[units.Zerg.Lair] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 57, 'square_length':5}
+DATA[units.Zerg.Lair] = {'mineral_cost':150, 'vespene_cost':100, 'food_required': 0, 'build_time': 57, 'grid_count':5}
 ### 蟲巢
-DATA[units.Zerg.Hive] = {'mineral_cost':200, 'vespene_cost':150, 'food_required': 0, 'build_time': 71, 'square_length':5}
+DATA[units.Zerg.Hive] = {'mineral_cost':200, 'vespene_cost':150, 'food_required': 0, 'build_time': 71, 'grid_count':5}
 ### 瓦斯萃取巢
-DATA[units.Zerg.Extractor] = {'mineral_cost':25, 'vespene_cost':0, 'food_required': 0, 'build_time': 21, 'square_length':3}
+DATA[units.Zerg.Extractor] = {'mineral_cost':25, 'vespene_cost':0, 'food_required': 0, 'build_time': 21, 'grid_count':3}
 ### 孵化池
-DATA[units.Zerg.SpawningPool] = {'mineral_cost':200, 'vespene_cost':0, 'food_required': 0, 'build_time': 46, 'square_length':3}
+DATA[units.Zerg.SpawningPool] = {'mineral_cost':200, 'vespene_cost':0, 'food_required': 0, 'build_time': 46, 'grid_count':3}
 ### 進化室
-DATA[units.Zerg.EvolutionChamber] = {'mineral_cost':75, 'vespene_cost':0, 'food_required': 0, 'build_time': 25, 'square_length':3}
+DATA[units.Zerg.EvolutionChamber] = {'mineral_cost':75, 'vespene_cost':0, 'food_required': 0, 'build_time': 25, 'grid_count':3}
 ### 孢子爬行蟲
-DATA[units.Zerg.SporeCrawler] = {'mineral_cost':75, 'vespene_cost':0, 'food_required': 0, 'build_time': 21, 'square_length':2}
+DATA[units.Zerg.SporeCrawler] = {'mineral_cost':75, 'vespene_cost':0, 'food_required': 0, 'build_time': 21, 'grid_count':2}
 ### 脊刺爬行蟲
-DATA[units.Zerg.SpineCrawler] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 36, 'square_length':2}
+DATA[units.Zerg.SpineCrawler] = {'mineral_cost':100, 'vespene_cost':0, 'food_required': 0, 'build_time': 36, 'grid_count':2}
 ### 蟑螂繁殖場
-DATA[units.Zerg.RoachWarren] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 39, 'square_length':3}
+DATA[units.Zerg.RoachWarren] = {'mineral_cost':150, 'vespene_cost':0, 'food_required': 0, 'build_time': 39, 'grid_count':3}
 ### 毒爆蟲巢
-DATA[units.Zerg.BanelingNest] = {'mineral_cost':100, 'vespene_cost':50, 'food_required': 0, 'build_time': 43, 'square_length':3}
+DATA[units.Zerg.BanelingNest] = {'mineral_cost':100, 'vespene_cost':50, 'food_required': 0, 'build_time': 43, 'grid_count':3}
 ### 刺蛇巢穴
-DATA[units.Zerg.HydraliskDen] = {'mineral_cost':100, 'vespene_cost':100, 'food_required': 0, 'build_time': 29, 'square_length':3}
+DATA[units.Zerg.HydraliskDen] = {'mineral_cost':100, 'vespene_cost':100, 'food_required': 0, 'build_time': 29, 'grid_count':3}
 ### 遁地獸穴
-DATA[units.Zerg.LurkerDen] = {'mineral_cost':100, 'vespene_cost':150, 'food_required': 0, 'build_time': 86, 'square_length':3}
+DATA[units.Zerg.LurkerDen] = {'mineral_cost':100, 'vespene_cost':150, 'food_required': 0, 'build_time': 86, 'grid_count':3}
 ### 螺旋塔
-DATA[units.Zerg.Spire] = {'mineral_cost':200, 'vespene_cost':200, 'food_required': 0, 'build_time': 71, 'square_length':2}
+DATA[units.Zerg.Spire] = {'mineral_cost':200, 'vespene_cost':200, 'food_required': 0, 'build_time': 71, 'grid_count':2}
 ### 巨型螺旋塔
-DATA[units.Zerg.GreaterSpire] = {'mineral_cost':100, 'vespene_cost':150, 'food_required': 0, 'build_time': 71, 'square_length':2}
+DATA[units.Zerg.GreaterSpire] = {'mineral_cost':100, 'vespene_cost':150, 'food_required': 0, 'build_time': 71, 'grid_count':2}
 ### 感染巢
-DATA[units.Zerg.InfestationPit] = {'mineral_cost':100, 'vespene_cost':100, 'food_required': 0, 'build_time': 36, 'square_length':3}
+DATA[units.Zerg.InfestationPit] = {'mineral_cost':100, 'vespene_cost':100, 'food_required': 0, 'build_time': 36, 'grid_count':3}
 ### 雷獸洞穴
-DATA[units.Zerg.UltraliskCavern] = {'mineral_cost':150, 'vespene_cost':200, 'food_required': 0, 'build_time': 46, 'square_length':3}
+DATA[units.Zerg.UltraliskCavern] = {'mineral_cost':150, 'vespene_cost':200, 'food_required': 0, 'build_time': 46, 'grid_count':3}
 ### 蟲殖地網
-DATA[units.Zerg.NydusNetwork] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 36, 'square_length':3}
+DATA[units.Zerg.NydusNetwork] = {'mineral_cost':150, 'vespene_cost':150, 'food_required': 0, 'build_time': 36, 'grid_count':3}
 ### 地下蠕蟲
-DATA[units.Zerg.NydusCanal] = {'mineral_cost':50, 'vespene_cost':50, 'food_required': 0, 'build_time': 14, 'square_length':3}
+DATA[units.Zerg.NydusCanal] = {'mineral_cost':50, 'vespene_cost':50, 'food_required': 0, 'build_time': 14, 'grid_count':3}
 ### 蟲苔瘤
-DATA[units.Zerg.CreepTumorBurrowed] = {'mineral_cost':0, 'vespene_cost':0, 'food_required': 0, 'build_time': 11, 'square_length':1}
+DATA[units.Zerg.CreepTumorBurrowed] = {'mineral_cost':0, 'vespene_cost':0, 'food_required': 0, 'build_time': 11, 'grid_count':1}

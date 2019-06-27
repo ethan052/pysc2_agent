@@ -2,9 +2,9 @@
 ### Simple64(簡單64)
 MAP=Simple64
 ### YearZero(紀年起源)
-MAP=YearZero
+# MAP=YearZero
 ### PortAleksander(亞歷克桑德港)
-# MAP=PortAleksander
+MAP=PortAleksander
 ### NewRepugnancy(新生衝突點)
 # MAP=NewRepugnancy
 ### KingsCove(國王海灣)

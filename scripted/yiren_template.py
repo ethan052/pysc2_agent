@@ -41,6 +41,8 @@ class GeneralAgent(base_agent.BaseAgent):
                   ]
   MINERAL_BIAS = (0, 0)
   VESPENE_BIAS = (0, 0)
+  # 遊戲畫面的輔助格邊長，約等於 feature_scren 的 3 像素長
+  GRID_SIDE_LENGTH = 3
   DEBUG_OUTPUT_PATH = '/home/yiren/Pictures'
   RACE_ID = 0
   WORKER_TYPE = None
@@ -59,7 +61,6 @@ class GeneralAgent(base_agent.BaseAgent):
     self.MinimapSize = (0, 0)
     self.CameraOffset = None
     self.FirstViewport = None
-    self.UnitGridSize = None
     # useful hidden states    
     self._current_camera = None
     self._expected_selected = None
@@ -213,20 +214,16 @@ class GeneralAgent(base_agent.BaseAgent):
     return intersection_points
   
   def create_townhall_margin_mask(self, screen_shape, townhall_location):
-    townhall_grid_length = _UnitNumeric[self.TOWNHALL_TYPES[0]]['square_length']
+    townhall_grid_length = _UnitNumeric[self.TOWNHALL_TYPES[0]]['grid_count']
     (LEFT, TOP, RIGHT, BOTTOM) = range(4)
-    # 遊戲畫面的輔助格邊長，約等於 feature_scren 的 3 像素長
-    grid_size = 3
-    radius_bias = 0
-    townhall_radius = int(math.floor(grid_size*townhall_grid_length/2.0))+radius_bias
-    radii = [grid_size*2, grid_size*4, grid_size*5, grid_size*6, grid_size*6+1]
-    #for j in range(6, 13):
-    #  radii.append(townhall_radius+j)
+    
+    townhall_radius = int(math.floor(self.GRID_SIDE_LENGTH*townhall_grid_length/2.0))
+    RADII = [self.GRID_SIDE_LENGTH*2, self.GRID_SIDE_LENGTH*4, self.GRID_SIDE_LENGTH*5, self.GRID_SIDE_LENGTH*6, self.GRID_SIDE_LENGTH*6+1]
     values = []
-    for radius in radii:
+    for radius in RADII:
       values.append([townhall_location[i%2]+(i//2*2-1)*radius for i in range(4)])    
     
-    LOOSE = len(radii)-1
+    LOOSE = len(RADII)-1
     for i in (LEFT, TOP):
       for j in range(LOOSE, -1, -1):
         if values[j][i] < 0:
@@ -300,6 +297,18 @@ class GeneralAgent(base_agent.BaseAgent):
     return return_locs
 
 
+  def _get_grid_count_townhall(self):
+    if type(self) == GeneralAgent:
+      return 5
+    return _UnitNumeric[self.TOWNHALL_TYPES[0]]['grid_count']
+
+
+  def _get_grid_count_gas_plant(self):
+    if type(self) == GeneralAgent:
+      return 3
+    return _UnitNumeric[self.GAS_PLANT_TYPE]['grid_count']
+
+
   def _get_unit_screen(self, obs, player_role, unit_type_list, tuple_form=False):
     return_locs = []
     player_relative = obs.observation.feature_screen.player_relative
@@ -366,10 +375,18 @@ class GeneralAgent(base_agent.BaseAgent):
           if not contradiction.any():
             return maybe_center        
     return None
+
+  
+  @classmethod  
+  def set_color_in_density_image(cls, image, density):
+    image[(density==1)] = (255, 255, 255)
+    image[(density==2)] = (191, 191, 191)
+    image[(density==3)] = (127, 127, 127)
+    image[(density==4)] = (63, 63, 63)
     
-    
-  def _get_resource_screen_new(self, obs, debug_output=False):
+  def _get_resource_screen(self, obs, debug_output=False):
     DEBUG_OUTPUT = debug_output
+    SCREEN_SHAPE = (self.ScreenSize[1], self.ScreenSize[0])
     unit_type = obs.observation.feature_screen.unit_type    
     unit_density = obs.observation.feature_screen.unit_density
     player_relative = obs.observation.feature_screen.player_relative
@@ -380,56 +397,50 @@ class GeneralAgent(base_agent.BaseAgent):
 
     if DEBUG_OUTPUT:
       fig0, (ax1, ax2, ax3, ax4) = plt.subplots(ncols=4, nrows=1, sharex=True, sharey=True, figsize=(6, 2))
-      image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
-      image[(unanalyzed_density==1)] = (255, 255, 255)
-      image[(unanalyzed_density==2)] = (191, 191, 191)
-      image[(unanalyzed_density==3)] = (127, 127, 127)
-      image[(unanalyzed_density==4)] = (63, 63, 63)
+      image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
+      self.set_color_in_density_image(image, unanalyzed_density)
       ax1.imshow(image)
 
-    union_mineral_mask = numpy.full(unit_type.shape, False)
+    union_mineral_mask = numpy.full(SCREEN_SHAPE, False)
     resource_type_list = self.MINERAL_TYPES
     for resource_type in resource_type_list:
       unit_type_mask = (unit_type == resource_type)
       union_mineral_mask = numpy.logical_or(union_mineral_mask, unit_type_mask)
 
     if DEBUG_OUTPUT:
-      image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
+      image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
       image[union_mineral_mask] = (0, 0, 85)
       ax2.imshow(image)
 
-    union_vespene_mask = numpy.full(unit_type.shape, False)
+    union_vespene_mask = numpy.full(SCREEN_SHAPE, False)
     resource_type_list = self.VESPENE_TYPES
     for resource_type in resource_type_list:
       unit_type_mask = (unit_type == resource_type)
       union_vespene_mask = numpy.logical_or(union_vespene_mask, unit_type_mask)
 
     if DEBUG_OUTPUT:
-      image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
+      image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
       image[union_vespene_mask] = (0, 85, 0)
       ax3.imshow(image)
 
     union_resource_mask = numpy.logical_or(union_mineral_mask, union_vespene_mask)
 
     if DEBUG_OUTPUT:
-      image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
+      image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
       image[numpy.logical_and(numpy.logical_not(union_resource_mask), (unanalyzed_density>0))] = (85, 0, 0)
       ax4.imshow(image)
-      filename = 'debug_new_init_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
+      filename = 'debug_original_density_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
       plt.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
       plt.close(fig0)
         
-    mineral_fragment_density = numpy.zeros(unit_density.shape, dtype=numpy.int32)
+    mineral_fragment_density = numpy.zeros(SCREEN_SHAPE, dtype=numpy.int32)
     mineral_field_list = []
 
     if DEBUG_OUTPUT:
       fig1, axs = plt.subplots(ncols=5, nrows=2, sharex=True, sharey=True, figsize=(10, 4))
       ax_index = 0
-      image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
-      image[(unanalyzed_density==1)] = (255, 255, 255)
-      image[(unanalyzed_density==2)] = (191, 191, 191)
-      image[(unanalyzed_density==3)] = (127, 127, 127)
-      image[(unanalyzed_density==4)] = (63, 63, 63)
+      image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
+      self.set_color_in_density_image(image, unanalyzed_density)
       axs[ax_index//5][ax_index%5].imshow(image)
       ax_index += 1
       
@@ -443,14 +454,11 @@ class GeneralAgent(base_agent.BaseAgent):
         mineral_center = self._detect_mineral_screen(mineral_temp_mask)
       if mineral_center is not None:
         mineral_field_list.append(mineral_center)
-        circle_mask = self.create_mineral_circle_mask(unit_density.shape, mineral_center)
+        circle_mask = self.create_mineral_circle_mask(SCREEN_SHAPE, mineral_center)
         unanalyzed_density[circle_mask] -= 1
         if DEBUG_OUTPUT:
-          image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
-          image[(unanalyzed_density==1)] = (255, 255, 255)
-          image[(unanalyzed_density==2)] = (191, 191, 191)
-          image[(unanalyzed_density==3)] = (127, 127, 127)
-          image[(unanalyzed_density==4)] = (63, 63, 63)
+          image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
+          self.set_color_in_density_image(image, unanalyzed_density)
           axs[ax_index//5][ax_index%5].imshow(image)
           ax_index += 1
         mineral_density = numpy.array(unanalyzed_density)
@@ -474,14 +482,11 @@ class GeneralAgent(base_agent.BaseAgent):
           mineral_center = self._detect_mineral_screen(mineral_temp_mask)
         if mineral_center is not None:        
           mineral_field_list.append(mineral_center)
-          circle_mask = self.create_mineral_circle_mask(unit_density.shape, mineral_center)
+          circle_mask = self.create_mineral_circle_mask(SCREEN_SHAPE, mineral_center)
           unanalyzed_density[circle_mask] -= 1
           if DEBUG_OUTPUT:
-            image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
-            image[(unanalyzed_density==1)] = (255, 255, 255)
-            image[(unanalyzed_density==2)] = (191, 191, 191)
-            image[(unanalyzed_density==3)] = (127, 127, 127)
-            image[(unanalyzed_density==4)] = (63, 63, 63)
+            image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
+            self.set_color_in_density_image(image, unanalyzed_density)
             axs[ax_index//5][ax_index%5].imshow(image)
             ax_index += 1
           mineral_density = numpy.array(unanalyzed_density)
@@ -492,7 +497,7 @@ class GeneralAgent(base_agent.BaseAgent):
         else:
           break
     if DEBUG_OUTPUT:
-      filename = 'debug_new_mineral_gathering_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
+      filename = 'debug_mineral_gathering_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
       plt.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
       plt.close(fig1)
 
@@ -500,26 +505,20 @@ class GeneralAgent(base_agent.BaseAgent):
     cloned_density[numpy.logical_not(neutral_mask)] = 0
 
     if DEBUG_OUTPUT:
-      image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
-      image[(cloned_density==1)] = (255, 255, 255)
-      image[(cloned_density==2)] = (191, 191, 191)
-      image[(cloned_density==3)] = (127, 127, 127)
-      image[(cloned_density==4)] = (63, 63, 63)
+      image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
+      self.set_color_in_density_image(image, cloned_density)
 
     mineral_barycenter = [0, 0]
     for center in mineral_field_list:
       mineral_barycenter[0] += center[0]
       mineral_barycenter[1] += center[1]
-      circle_mask = self.create_mineral_circle_mask(cloned_density.shape, center)
+      circle_mask = self.create_mineral_circle_mask(SCREEN_SHAPE, center)
       cloned_density[circle_mask] -= 1        
     count_mineral_field = len(mineral_field_list)
     mineral_barycenter[0] /= count_mineral_field
     mineral_barycenter[1] /= count_mineral_field
-
     
     vespene_temp_mask = numpy.logical_and(union_resource_mask, (cloned_density>0))
-    
-    #temp_vespene_geyser_list = self.get_locations_screen(union_vespene_mask, 2, False)
     temp_vespene_geyser_list = self.get_locations_screen(vespene_temp_mask, 2, False)
 
     distances = [(self.calculate_distance_square(mineral_barycenter, c), c) for c in temp_vespene_geyser_list if union_vespene_mask[c[1], c[0]] ]
@@ -532,152 +531,11 @@ class GeneralAgent(base_agent.BaseAgent):
       for center in vespene_geyser_list:
         image[center[1], center[0]] = (0, 255, 0)
         
-      filename = 'debug_new_center_%02d_%02d_.png' % (self._current_camera[0], self._current_camera[1])
+      filename = 'debug_center_%02d_%02d_.png' % (self._current_camera[0], self._current_camera[1])
       skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, image)
               
     return (mineral_field_list, vespene_geyser_list)
     
-    
-  def _get_resource_screen(self, obs, debug_output=False):
-    DEBUG_OUTPUT = debug_output
-    unit_type = obs.observation.feature_screen.unit_type    
-    unit_density = obs.observation.feature_screen.unit_density
-    
-    if DEBUG_OUTPUT:
-      original_density_image = skimage_color.gray2rgb(numpy.zeros(unit_density.shape, dtype=numpy.uint8))
-      original_density_image[(cloned_density==1)] = (255, 255, 255)
-      original_density_image[(cloned_density==2)] = (191, 191, 191)
-      original_density_image[(cloned_density==3)] = (63, 63, 63)
-      original_density_image[(cloned_density==4)] = (31, 31, 31)
-      filename = 'debug_density_%02d_%02d_.png' % (self._current_camera[0], self._current_camera[1])
-      skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, original_density_image)
-
-    union_resource_mask = numpy.full(unit_type.shape, False)
-    resource_type_list = self.MINERAL_TYPES + self.VESPENE_TYPES
-    for resource_type in resource_type_list:
-      unit_type_mask = (unit_type == resource_type)
-      union_resource_mask = numpy.logical_or(union_resource_mask, unit_type_mask)
-    cloned_density[numpy.logical_not(union_resource_mask)] = 0
-    
-    if DEBUG_OUTPUT:
-      fig0, (ax1, ax2, ax3, ax4) = plt.subplots(ncols=4, nrows=1, sharex=True, sharey=True, figsize=(6, 2))
-      original_density_image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
-      original_density_image[(cloned_density==1)] = (255, 255, 255)
-      original_density_image[(cloned_density==2)] = (170, 170, 170)
-      original_density_image[(cloned_density==3)] = (85, 85, 85)
-      ax1.imshow(original_density_image)
-
-    for geyser_type in self.VESPENE_TYPES:
-      unit_type_mask = (unit_type == geyser_type)
-      y_arr, x_arr = unit_type_mask.nonzero()
-      point_list = list(zip(y_arr, x_arr))
-      for (y, x) in point_list:
-        cloned_density[y, x] -= 1
-          
-    y_arr, x_arr = (cloned_density>1).nonzero()
-    geyser_centers = self._get_vespene_screen(obs, False)
-    point_list = list(zip(y_arr, x_arr)) 
-    for barycenter in geyser_centers:
-      for (y, x) in point_list:
-        if self.calculate_distance_square(barycenter, (x,y) ) <= 40.0:            
-          cloned_density[y, x] -= 1
-
-    if DEBUG_OUTPUT:
-      patch1_density_image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
-      patch1_density_image[(cloned_density==1)] = (255, 255, 255)
-      patch1_density_image[(cloned_density==2)] = (170, 170, 170)
-      patch1_density_image[(cloned_density==3)] = (85, 85, 85)
-      ax3.imshow(patch1_density_image)          
-      for center in geyser_centers:
-        original_density_image[int(round(center[1])), int(round(center[0]))] = (255,0,0)
-      for (y, x) in point_list:
-        original_density_image[y, x] = (0,255,0)
-        for center in geyser_centers:
-          if self.calculate_distance_square(center, (x,y) ) <= 40.0:
-            original_density_image[y, x] = (0,0,255)
-
-      ax2.imshow(original_density_image)
-      filename = 'debug_original_density_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
-      skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, original_density_image)
-
-      patch2_density_image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
-      patch2_density_image[(cloned_density==1)] = (255, 255, 255)
-      patch2_density_image[(cloned_density==2)] = (170, 170, 170)
-      patch2_density_image[(cloned_density==3)] = (85, 85, 85)
-      ax4.imshow(patch2_density_image)
-
-      filename = 'debug_density_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
-      plt.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
-      plt.close(fig0)
-
-    union_mineral_mask = (cloned_density>0)
-    mineral_field_list = []
-
-    if DEBUG_OUTPUT:
-      fig1, axs = plt.subplots(ncols=5, nrows=2, sharex=True, sharey=True, figsize=(10, 4))
-      for i in range(10):
-        if not union_mineral_mask.any():
-          break
-        union_mineral_image = numpy.zeros(unit_type.shape, dtype=numpy.uint8)
-        union_mineral_image[union_mineral_mask] = 255
-        debug_image = skimage_color.gray2rgb(union_mineral_image)
-        axs[i//5][i%5].imshow(debug_image)
-
-        mineral_center = self._detect_mineral_screen(union_mineral_mask)
-        if mineral_center is not None:
-          mineral_field_list.append(mineral_center)
-          cloned_density[circle_mask] -= 1
-          union_mineral_mask = (cloned_density > 0)
-      
-      filename = 'debug_mineral_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
-      plt.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
-      plt.close(fig1)
-    else:
-      for i in range(10):
-        if not union_mineral_mask.any():
-          break
-        mineral_center = self._detect_mineral_screen(union_mineral_mask)
-        if mineral_center is not None:
-          mineral_field_list.append(mineral_center)
-          cloned_density[circle_mask] -= 1
-          union_mineral_mask = (cloned_density > 0)
-    
-    cloned_density = numpy.array(unit_density)
-    cloned_density[numpy.logical_not(union_resource_mask)] = 0
-
-    if DEBUG_OUTPUT:
-      original_density_image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
-      original_density_image[(cloned_density==1)] = (255, 255, 255)
-      original_density_image[(cloned_density==2)] = (170, 170, 170)
-      original_density_image[(cloned_density==3)] = (85, 85, 85)
-    
-    mineral_barycenter = [0, 0]
-    for center in mineral_field_list:
-      mineral_barycenter[0] += center[0]
-      mineral_barycenter[1] += center[1]
-      circle_mask = self.create_mineral_circle_mask(cloned_density.shape, center)
-      cloned_density[circle_mask] -= 1
-    count_mineral_field = len(mineral_field_list)
-    mineral_barycenter[0] /= count_mineral_field
-    mineral_barycenter[1] /= count_mineral_field
-
-    if DEBUG_OUTPUT:
-      for center in mineral_field_list:
-        original_density_image[center[1], center[0]] = (0, 0, 255)
-
-    union_vespene_mask = (cloned_density == 1)
-    
-    temp_vespene_geyser_list = self.get_locations_screen(union_vespene_mask, 2, False)
-    distances = [(self.calculate_distance_square(mineral_barycenter, c), c) for c in temp_vespene_geyser_list]
-    count_temp_vespene_geyser = len(temp_vespene_geyser_list)    
-    vespene_geyser_list = [ c for d,c in sorted(distances)[0:2 if count_temp_vespene_geyser>=2 else count_temp_vespene_geyser] ]
-    if DEBUG_OUTPUT:
-      for center in vespene_geyser_list:
-        original_density_image[center[1], center[0]] = (0, 255, 0)
-      filename = 'debug_center_%02d_%02d_.png' % (self._current_camera[0], self._current_camera[1])
-      skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, original_density_image)
-    return (mineral_field_list, vespene_geyser_list)
-
       
   def _check_resource_overlapping_townhall(self, screen_shape, townhall_location, mineral_field_list, vespene_geyser_list):    
     townhall_margin_mask = self.create_townhall_margin_mask(screen_shape, townhall_location)
@@ -693,7 +551,7 @@ class GeneralAgent(base_agent.BaseAgent):
     townhall_image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
     townhall_margin_mask = self.create_townhall_margin_mask(unit_type.shape, townhall_location)
     townhall_image[townhall_margin_mask] = (85, 0, 0)
-    townhall_mask = self.create_circle_mask(unit_type.shape[1], unit_type.shape[0], townhall_location, 9**2+3.5**2)
+    townhall_mask = self.create_circle_mask(unit_type.shape[0], unit_type.shape[1], townhall_location, 9**2+3.5**2)
     townhall_image[townhall_mask] = (255, 255, 0)
 
     unit_density = obs.observation.feature_screen.unit_density
@@ -706,9 +564,7 @@ class GeneralAgent(base_agent.BaseAgent):
       union_resource_mask = numpy.logical_or(union_resource_mask, unit_type_mask)
     cloned_density[numpy.logical_not(union_resource_mask)] = 0
 
-    townhall_image[(cloned_density==1)] = (255, 255, 255)
-    townhall_image[(cloned_density==2)] = (170, 170, 170)
-    townhall_image[(cloned_density==3)] = (85, 85, 85)
+    self.set_color_in_density_image(townhall_image, cloned_density)
 
     mineral_field_list_mask = self.create_mineral_field_list_mask(unit_type.shape, mineral_field_list)
     townhall_image[mineral_field_list_mask] = (0, 0, 170)
@@ -729,37 +585,31 @@ class GeneralAgent(base_agent.BaseAgent):
   
         
   def _calculate_townhall_best_location(self, obs, debug_output=False):
-    DEBUG_OUTPUT = debug_output
-    unit_type = obs.observation.feature_screen.unit_type
-    mineral_source_list, vespene_source_list = self._get_resource_screen_new(obs, False)
+    DEBUG_OUTPUT = debug_output    
+    mineral_source_list, vespene_source_list = self._get_resource_screen(obs, False)
     count_mineral_source = len(mineral_source_list)    
     count_vespene_source = len(vespene_source_list)
     
-    #if count_vespene_source != 2:
-    #  return None
     if count_mineral_source < 2:
       return None
+    GRID_COUNT_townhall = self._get_grid_count_townhall()
+    GRID_COUNT_gas_plant = self._get_grid_count_gas_plant()
+    GRID_COUNT_PRESERVED = 4.8
+    MINERAL_DISTANCE_FROM_TOWNHALL = [self.GRID_SIDE_LENGTH*(GRID_COUNT_townhall/2+GRID_COUNT_PRESERVED+1), self.GRID_SIDE_LENGTH*(GRID_COUNT_townhall/2+GRID_COUNT_PRESERVED+0.5)]
+    VESPENE_DISTANCE_FROM_TOWNHALL = self.GRID_SIDE_LENGTH*((GRID_COUNT_townhall+GRID_COUNT_gas_plant)/2+GRID_COUNT_PRESERVED)
+    TOWNHALL_DIAMETER = GRID_COUNT_townhall*(self.GRID_SIDE_LENGTH+1)-1
+    SCREEN_CENTER = (self.ScreenSize[0]/2, self.ScreenSize[1]/2)
+    SCREEN_SHAPE = (self.ScreenSize[1], self.ScreenSize[0])
+
     left_most_index = 0
     right_most_index = 0
     top_most_index = 0
     bottom_most_index = 0
     (barycenter_x, barycenter_y) = mineral_source_list[0]
-    (left_most, top_most) = (mineral_source_list[0][0]-4, mineral_source_list[0][1]-4)
-    (right_most, bottom_most) = (mineral_source_list[0][0]+3, mineral_source_list[0][1]+3)
     for i in range(1, count_mineral_source):
       (x, y) = mineral_source_list[i]
       barycenter_x += x
       barycenter_y += y
-      (left, top) = (x-4, y-4)
-      (right, bottom) = (x+3, y+3)
-      if left < left_most:
-        left_most = left
-      if top < top_most:
-        top_most = top
-      if right > right_most:
-        right_most = right
-      if bottom > bottom_most:
-        bottom_most = bottom
       if x < mineral_source_list[left_most_index][0]:
         left_most_index = i
       if y < mineral_source_list[top_most_index][1]:
@@ -768,45 +618,23 @@ class GeneralAgent(base_agent.BaseAgent):
         right_most_index = i
       if y > mineral_source_list[bottom_most_index][1]:
         bottom_most_index = i
+    (left_most, top_most) = (mineral_source_list[left_most_index][0]-4, mineral_source_list[top_most_index][1]-4)
+    (right_most, bottom_most) = (mineral_source_list[right_most_index][0]+3, mineral_source_list[bottom_most_index][1]+3)
     barycenter_x /= count_mineral_source
     barycenter_y /= count_mineral_source
     barycenter = (barycenter_x, barycenter_y)
     mineral_region = (right_most-left_most, bottom_most-top_most)
-    townhall_grid_length = _UnitNumeric[self.TOWNHALL_TYPES[0]]['square_length']
-    gas_plant_grid_length = _UnitNumeric[self.GAS_PLANT_TYPE]['square_length']
-    mineral_distance_from_townhall = [3.0*(townhall_grid_length/2+4.8+1), 3.0*(townhall_grid_length/2+4.8+0.5)]
-    townhall_diameter = townhall_grid_length*4-1
-    screen_center = (self.ScreenSize[0]/2, self.ScreenSize[1]/2)
     vertical_middle = (top_most+bottom_most)/2.0
     horizontal_middle = (left_most+right_most)/2.0
     center = (horizontal_middle, vertical_middle)
-    #vespene_distance_from_townhall = ((townhall_grid_length+gas_plant_grid_length)/2+5.4)*3.0
-    #vespene_distance_square_from_townhall = vespene_distance_from_townhall**2+40.0
-    #circles = [(*vespene_source_list[i], vespene_distance_from_townhall) for i in (0, 1) ]
-    #intersection_points = [ (int(round(x)), int(round(y))) for (x, y) in self._calculate_circles_intersection_points(*circles)]
-    #(x1, y1) = vespene_source_list[0]
-    #(x2, y2) = vespene_source_list[1]
-    #let_a = (x2-x1)/2.0
-    #let_b = (y2-y1)/2.0
-    #let_sum_square = let_a**2 + let_b**2
-    #quad_square_t = ((vespene_distance_square_from_townhall) / let_sum_square) - 1
-    #positive_2t = math.sqrt(quad_square_t)
-    #negative_2t = -positive_2t
-    #let_c = ( let_a+x1+self.VESPENE_BIAS[0], let_b+y1+self.VESPENE_BIAS[1] )
-    #positive_offset = (let_b*positive_2t, let_a*positive_2t)
-    #negative_offset = (let_b*negative_2t, let_a*negative_2t)
-    #intersection_points = [ (int(round(let_c[0]-positive_offset[0])), int(round(let_c[1]+positive_offset[1])))
-    #                      , (int(round(let_c[0]-negative_offset[0])), int(round(let_c[1]+negative_offset[1])))
-    #                      ]
     candidate_point = None
     intersection_points = None
     if count_vespene_source == 2:
-      vespene_distance_from_townhall = ((townhall_grid_length+gas_plant_grid_length)/2+4.8)*3.0
-      circles = [(*vespene_source_list[i], vespene_distance_from_townhall) for i in (0, 1) ]
+      circles = [(*vespene_source_list[i], VESPENE_DISTANCE_FROM_TOWNHALL) for i in (0, 1) ]
       intersection_points = [ (int(round(x)), int(round(y))) for (x, y) in self._calculate_circles_intersection_points(*circles)]
-    if mineral_region[0] < townhall_diameter and mineral_region[1] < townhall_diameter:
+    if mineral_region[0] < TOWNHALL_DIAMETER and mineral_region[1] < TOWNHALL_DIAMETER:
       pass
-    elif mineral_region[0] >= townhall_diameter and mineral_region[1] >= townhall_diameter:    # 礦區像 L 型
+    elif mineral_region[0] >= TOWNHALL_DIAMETER and mineral_region[1] >= TOWNHALL_DIAMETER:    # 礦區像 L 型
       corners = [(left_most, top_most), (right_most, top_most), (left_most, bottom_most), (right_most, bottom_most)]
       distance_sum = [0] * 4
       chosen_index = -1
@@ -819,7 +647,7 @@ class GeneralAgent(base_agent.BaseAgent):
       corner_point = corners[chosen_index]      
       if intersection_points is None:
         corner_minerals = (mineral_source_list[left_most_index if 0==chosen_index%2 else right_most_index], mineral_source_list[top_most_index if 0==chosen_index//2 else bottom_most_index])
-        circles = [(*corner_minerals[i], mineral_distance_from_townhall[i]) for i in (0, 1) ]
+        circles = [(*corner_minerals[i], MINERAL_DISTANCE_FROM_TOWNHALL[i]) for i in (0, 1) ]
         intersection_points = [ (int(round(x)), int(round(y))) for (x, y) in self._calculate_circles_intersection_points(*circles)]
             
       distance_from_intersection = [self.calculate_distance_square(corner_point, p) for p in intersection_points]
@@ -827,7 +655,7 @@ class GeneralAgent(base_agent.BaseAgent):
         candidate_point = intersection_points[0]
       else:
         candidate_point = intersection_points[1]
-      if True == self._check_resource_overlapping_townhall(unit_type.shape, candidate_point, mineral_source_list, vespene_source_list):
+      if True == self._check_resource_overlapping_townhall(SCREEN_SHAPE, candidate_point, mineral_source_list, vespene_source_list):
         if DEBUG_OUTPUT:
           self._draw_debug_figure(obs, candidate_point,  mineral_source_list, vespene_source_list, 'calculated_%02d_%02d'% (candidate_point[0], candidate_point[1]))
         nearest_point = candidate_point
@@ -843,7 +671,7 @@ class GeneralAgent(base_agent.BaseAgent):
             flg_column = 0
             for x in horizontal_range:
               chosen_point = (x, y)
-              if not self._check_resource_overlapping_townhall(unit_type.shape, chosen_point, mineral_source_list, vespene_source_list):
+              if not self._check_resource_overlapping_townhall(SCREEN_SHAPE, chosen_point, mineral_source_list, vespene_source_list):
                 chosen_img = self._draw_debug_figure(obs, chosen_point, mineral_source_list, vespene_source_list, 'choose_%02d_%02d_valid' % (x, y))
                 subfig[flg_row][flg_column].set_title('Yes', fontdict={'fontsize': 8, 'fontweight': 'medium'})
                 distance = self.calculate_distance_square(barycenter, chosen_point)
@@ -864,7 +692,7 @@ class GeneralAgent(base_agent.BaseAgent):
           for y in vertical_range:
             for x in horizontal_range:
               chosen_point = (x, y)
-              if not self._check_resource_overlapping_townhall(unit_type.shape, chosen_point, mineral_source_list, vespene_source_list):
+              if not self._check_resource_overlapping_townhall(SCREEN_SHAPE, chosen_point, mineral_source_list, vespene_source_list):
                 distance = self.calculate_distance_square(barycenter, chosen_point)
                 if nearest_distance is None or distance < nearest_distance:
                   nearest_point = chosen_point
@@ -875,11 +703,11 @@ class GeneralAgent(base_agent.BaseAgent):
           self._draw_debug_figure(obs, candidate_point,  mineral_source_list, vespene_source_list, 'calculated_%02d_%02d_final'% (candidate_point[0], candidate_point[1]))
     else:
       direction_offset = None
-      if mineral_region[0] < townhall_diameter:    # 礦區像直的(狹長)
+      if mineral_region[0] < TOWNHALL_DIAMETER:    # 礦區像直的(狹長)
         center_left = (left_most, vertical_middle)
         center_right = (right_most, vertical_middle)
-        distance_from_left = self.calculate_distance_square(screen_center, center_left)
-        distance_from_right = self.calculate_distance_square(screen_center, center_right)
+        distance_from_left = self.calculate_distance_square(SCREEN_CENTER, center_left)
+        distance_from_right = self.calculate_distance_square(SCREEN_CENTER, center_right)
         if distance_from_left < distance_from_right:
           center = center_left
           direction_offset = (-1, 0)
@@ -888,12 +716,12 @@ class GeneralAgent(base_agent.BaseAgent):
           direction_offset = (1, 0)
         if intersection_points is None:
           corner_minerals = (mineral_source_list[top_most_index], mineral_source_list[bottom_most_index])
-          circles = [(*corner_minerals[i], math.sqrt(mineral_distance_from_townhall[1]**2+mineral_distance_from_townhall[1]**2)) for i in (0, 1) ]
-      elif mineral_region[1] < townhall_diameter:    # 礦區像橫的(扁平)    
+          circles = [(*corner_minerals[i], math.sqrt(MINERAL_DISTANCE_FROM_TOWNHALL[1]**2+MINERAL_DISTANCE_FROM_TOWNHALL[1]**2)) for i in (0, 1) ]
+      elif mineral_region[1] < TOWNHALL_DIAMETER:    # 礦區像橫的(扁平)    
         center_top = (horizontal_middle, top_most)
         center_bottom = (horizontal_middle, bottom_most)
-        distance_from_top = self.calculate_distance_square(screen_center, center_top)
-        distance_from_bottom = self.calculate_distance_square(screen_center, center_bottom)
+        distance_from_top = self.calculate_distance_square(SCREEN_CENTER, center_top)
+        distance_from_bottom = self.calculate_distance_square(SCREEN_CENTER, center_bottom)
         if distance_from_top < distance_from_bottom:
           center = center_top
           direction_offset = (0, -1)
@@ -902,11 +730,11 @@ class GeneralAgent(base_agent.BaseAgent):
           direction_offset = (0, 1)      
         if intersection_points is None:
           corner_minerals = (mineral_source_list[left_most_index], mineral_source_list[right_most_index])
-          circles = [(*corner_minerals[i], math.sqrt(mineral_distance_from_townhall[0]**2+mineral_distance_from_townhall[1]**2)) for i in (0, 1) ]
+          circles = [(*corner_minerals[i], math.sqrt(MINERAL_DISTANCE_FROM_TOWNHALL[0]**2+MINERAL_DISTANCE_FROM_TOWNHALL[1]**2)) for i in (0, 1) ]
       if intersection_points is None:
         intersection_points = [ (int(round(x)), int(round(y))) for (x, y) in self._calculate_circles_intersection_points(*circles)]
 
-      farthest_point = (center[0]+direction_offset[0]*mineral_distance_from_townhall[0], center[1]+direction_offset[1]*mineral_distance_from_townhall[1])
+      farthest_point = (center[0]+direction_offset[0]*MINERAL_DISTANCE_FROM_TOWNHALL[0], center[1]+direction_offset[1]*MINERAL_DISTANCE_FROM_TOWNHALL[1])
       distance_from_intersection = [self.calculate_distance_square(farthest_point, p) for p in intersection_points]
       if distance_from_intersection[0] < distance_from_intersection[1]:
         candidate_point = intersection_points[0]
@@ -914,7 +742,7 @@ class GeneralAgent(base_agent.BaseAgent):
         candidate_point = intersection_points[1]
       if DEBUG_OUTPUT:
         self._draw_debug_figure(obs, candidate_point,  mineral_source_list, vespene_source_list, 'calculated_%02d_%02d'% (candidate_point[0], candidate_point[1]))
-      while True == self._check_resource_overlapping_townhall(unit_type.shape, candidate_point, mineral_source_list, vespene_source_list):
+      while True == self._check_resource_overlapping_townhall(SCREEN_SHAPE, candidate_point, mineral_source_list, vespene_source_list):
         candidate_point = (candidate_point[0]+direction_offset[0], candidate_point[1]+direction_offset[1])
       if DEBUG_OUTPUT:
         self._draw_debug_figure(obs, candidate_point,  mineral_source_list, vespene_source_list, 'choose_%02d_%02d_final' % (candidate_point[0], candidate_point[1]))
@@ -943,7 +771,7 @@ class GeneralAgent(base_agent.BaseAgent):
     #world_coordinate = self.calculate_world_absolute_coordinate((self._current_camera, center))
     #local_coordinate = self.calculate_local_coordinate(world_coordinate)
     #self._calculated_resource_region_list.append( [local_coordinate[0], None] )
-    self._get_resource_screen_new(obs, True)
+    self._get_resource_screen(obs, True)
     self._calculated_resource_region_list.append( [self._current_camera, None] )
     return self._execute_moving_camera(obs, next_camera)
     
@@ -1061,7 +889,7 @@ class GeneralAgent(base_agent.BaseAgent):
       base_axis_vec = (base_axis_vec[0]/base_axis_len, base_axis_vec[1]/base_axis_len)
       base_axis.append((base_axis_vec, base_axis_len))
       
-    square_length = _UnitNumeric[self.TOWNHALL_TYPES[0]]['square_length']
+    square_length = _UnitNumeric[self.TOWNHALL_TYPES[0]]['grid_count']
     double_square_length = square_length*2
     
     for worker in worker_list:
@@ -1239,8 +1067,8 @@ class GeneralAgent(base_agent.BaseAgent):
       first_townhall = townhall_location_list[0]
       townhall_location = first_townhall[0]
       townhall_size = (first_townhall[2][0]-first_townhall[1][0], first_townhall[2][1]-first_townhall[1][1])
-      townhall_grid_length = _UnitNumeric[unit_type_id]['square_length']
-      self.UnitGridSize = (townhall_size[0]/townhall_grid_length, townhall_size[1]/townhall_grid_length)
+      townhall_grid_length = _UnitNumeric[unit_type_id]['grid_count']
+      
       #townhall_best_location = self._calculate_townhall_best_location(obs)
       world_absolute_coordinate = self.calculate_world_absolute_coordinate((self._current_camera, townhall_location))
       self._calculated_resource_region_list.append( (self._current_camera, townhall_location) )
