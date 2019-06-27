@@ -2,9 +2,9 @@
 ### Simple64(簡單64)
 MAP=Simple64
 ### YearZero(紀年起源)
-# MAP=YearZero
+MAP=YearZero
 ### PortAleksander(亞歷克桑德港)
-MAP=PortAleksander
+# MAP=PortAleksander
 ### NewRepugnancy(新生衝突點)
 # MAP=NewRepugnancy
 ### KingsCove(國王海灣)
@@ -34,3 +34,5 @@ AGENT2_CLS=pysc2.agents.yiren.idle_agent.IdleAgent2
 AGENT2_RACE=random
 
 python3 -m pysc2.bin.agent --map ${MAP} --render True --save_replay True --agent ${AGENT1_CLS} --agent_race ${AGENT1_RACE} --agent2 ${AGENT2_CLS} --agent2_race ${AGENT2_RACE}
+mkdir -p ~yiren/Pictures/${MAP}
+mv ~yiren/Pictures/debug_* ~yiren/Pictures/${MAP}/
