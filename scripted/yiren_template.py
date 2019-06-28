@@ -214,10 +214,10 @@ class GeneralAgent(base_agent.BaseAgent):
     return intersection_points
   
   def create_townhall_margin_mask(self, screen_shape, townhall_location):
-    townhall_grid_length = _UnitNumeric[self.TOWNHALL_TYPES[0]]['grid_count']
+    GRID_COUNT_townhall = self._get_grid_count_townhall()
     (LEFT, TOP, RIGHT, BOTTOM) = range(4)
     
-    townhall_radius = int(math.floor(self.GRID_SIDE_LENGTH*townhall_grid_length/2.0))
+    
     RADII = [self.GRID_SIDE_LENGTH*2, self.GRID_SIDE_LENGTH*4, self.GRID_SIDE_LENGTH*5, self.GRID_SIDE_LENGTH*6, self.GRID_SIDE_LENGTH*6+1]
     values = []
     for radius in RADII:
@@ -277,22 +277,14 @@ class GeneralAgent(base_agent.BaseAgent):
     return_locs = []
     for exist_serial in grouped_points.keys():
       if len(grouped_points[exist_serial]) > 0:
-        top, left, bottom, right = None, None, None, None
-        for (x, y) in grouped_points[exist_serial]:
-          if left is None or x < left:
-            left = x
-          if right is None or x > right:
-            right = x
-          if top is None or y < top:
-            top = y
-          if bottom is None or y > bottom:
-            bottom = y           
-        
+        point_arr = numpy.array(list(grouped_points[exist_serial]))
+        left, top = point_arr.min(axis=0)
+        right, bottom = point_arr.max(axis=0)        
         if tuple_form:
           center = ((left+right)/2.0, (top+bottom)/2.0)
           return_locs.append( (center, (left,top), (right,bottom) ) )
         else:
-          center = (int(round((left+right)/2)), int(round((top+bottom)/2)))
+          center = (int(round((left+right)/2.0)), int(round((top+bottom)/2.0)))
           return_locs.append( center )
     return return_locs
 
@@ -327,10 +319,6 @@ class GeneralAgent(base_agent.BaseAgent):
 
   def _get_my_townhall_screen(self, obs, tuple_form=False):
     unit_type = obs.observation.feature_screen.unit_type
-    #townhall_image = skimage_color.gray2rgb(numpy.zeros(unit_type.shape, dtype=numpy.uint8))
-    #townhall_image[(unit_type==self.TOWNHALL_TYPES[0])] = (255, 255, 0)
-    #filename = 'debug_townhall_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
-    #skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, townhall_image)    
     return self._get_my_unit_screen(obs, self.TOWNHALL_TYPES, tuple_form)
 
 
@@ -383,6 +371,7 @@ class GeneralAgent(base_agent.BaseAgent):
     image[(density==2)] = (191, 191, 191)
     image[(density==3)] = (127, 127, 127)
     image[(density==4)] = (63, 63, 63)
+
     
   def _get_resource_screen(self, obs, debug_output=False):
     DEBUG_OUTPUT = debug_output
@@ -508,20 +497,16 @@ class GeneralAgent(base_agent.BaseAgent):
       image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
       self.set_color_in_density_image(image, cloned_density)
 
-    mineral_barycenter = [0, 0]
+    point_arr = numpy.array(mineral_field_list)
+    barycenter = point_arr.mean(axis=0)
     for center in mineral_field_list:
-      mineral_barycenter[0] += center[0]
-      mineral_barycenter[1] += center[1]
       circle_mask = self.create_mineral_circle_mask(SCREEN_SHAPE, center)
       cloned_density[circle_mask] -= 1        
-    count_mineral_field = len(mineral_field_list)
-    mineral_barycenter[0] /= count_mineral_field
-    mineral_barycenter[1] /= count_mineral_field
     
     vespene_temp_mask = numpy.logical_and(union_resource_mask, (cloned_density>0))
     temp_vespene_geyser_list = self.get_locations_screen(vespene_temp_mask, 2, False)
 
-    distances = [(self.calculate_distance_square(mineral_barycenter, c), c) for c in temp_vespene_geyser_list if union_vespene_mask[c[1], c[0]] ]
+    distances = [(self.calculate_distance_square(barycenter, c), c) for c in temp_vespene_geyser_list if union_vespene_mask[c[1], c[0]] ]
     count_temp_vespene_geyser = len(temp_vespene_geyser_list)    
     vespene_geyser_list = [ c for d,c in sorted(distances)[0:2 if count_temp_vespene_geyser>=2 else count_temp_vespene_geyser] ]
 
@@ -586,9 +571,9 @@ class GeneralAgent(base_agent.BaseAgent):
         
   def _calculate_townhall_best_location(self, obs, debug_output=False):
     DEBUG_OUTPUT = debug_output    
-    mineral_source_list, vespene_source_list = self._get_resource_screen(obs, False)
-    count_mineral_source = len(mineral_source_list)    
-    count_vespene_source = len(vespene_source_list)
+    mineral_field_list, vespene_geyser_list = self._get_resource_screen(obs, False)
+    count_mineral_source = len(mineral_field_list)    
+    count_vespene_source = len(vespene_geyser_list)
     
     if count_mineral_source < 2:
       return None
@@ -601,28 +586,12 @@ class GeneralAgent(base_agent.BaseAgent):
     SCREEN_CENTER = (self.ScreenSize[0]/2, self.ScreenSize[1]/2)
     SCREEN_SHAPE = (self.ScreenSize[1], self.ScreenSize[0])
 
-    left_most_index = 0
-    right_most_index = 0
-    top_most_index = 0
-    bottom_most_index = 0
-    (barycenter_x, barycenter_y) = mineral_source_list[0]
-    for i in range(1, count_mineral_source):
-      (x, y) = mineral_source_list[i]
-      barycenter_x += x
-      barycenter_y += y
-      if x < mineral_source_list[left_most_index][0]:
-        left_most_index = i
-      if y < mineral_source_list[top_most_index][1]:
-        top_most_index = i
-      if x > mineral_source_list[right_most_index][0]:
-        right_most_index = i
-      if y > mineral_source_list[bottom_most_index][1]:
-        bottom_most_index = i
-    (left_most, top_most) = (mineral_source_list[left_most_index][0]-4, mineral_source_list[top_most_index][1]-4)
-    (right_most, bottom_most) = (mineral_source_list[right_most_index][0]+3, mineral_source_list[bottom_most_index][1]+3)
-    barycenter_x /= count_mineral_source
-    barycenter_y /= count_mineral_source
-    barycenter = (barycenter_x, barycenter_y)
+    point_arr = numpy.array(mineral_field_list)
+    barycenter = point_arr.mean(axis=0)
+    left_most_index, top_most_index = point_arr.argmin(axis=0)
+    right_most_index, bottom_most_index = point_arr.argmax(axis=0)
+    (left_most, top_most) = (mineral_field_list[left_most_index][0]-4, mineral_field_list[top_most_index][1]-4)
+    (right_most, bottom_most) = (mineral_field_list[right_most_index][0]+3, mineral_field_list[bottom_most_index][1]+3)
     mineral_region = (right_most-left_most, bottom_most-top_most)
     vertical_middle = (top_most+bottom_most)/2.0
     horizontal_middle = (left_most+right_most)/2.0
@@ -630,7 +599,7 @@ class GeneralAgent(base_agent.BaseAgent):
     candidate_point = None
     intersection_points = None
     if count_vespene_source == 2:
-      circles = [(*vespene_source_list[i], VESPENE_DISTANCE_FROM_TOWNHALL) for i in (0, 1) ]
+      circles = [(*vespene_geyser_list[i], VESPENE_DISTANCE_FROM_TOWNHALL) for i in (0, 1) ]
       intersection_points = [ (int(round(x)), int(round(y))) for (x, y) in self._calculate_circles_intersection_points(*circles)]
     if mineral_region[0] < TOWNHALL_DIAMETER and mineral_region[1] < TOWNHALL_DIAMETER:
       pass
@@ -639,14 +608,14 @@ class GeneralAgent(base_agent.BaseAgent):
       distance_sum = [0] * 4
       chosen_index = -1
       for k in range(4):
-        for mineral_center in mineral_source_list:
+        for mineral_center in mineral_field_list:
           distance_sum[k] += math.sqrt(self.calculate_distance_square(corners[k], mineral_center))
         if -1 == chosen_index or distance_sum[k] > distance_sum[chosen_index]:
           chosen_index = k
           
       corner_point = corners[chosen_index]      
       if intersection_points is None:
-        corner_minerals = (mineral_source_list[left_most_index if 0==chosen_index%2 else right_most_index], mineral_source_list[top_most_index if 0==chosen_index//2 else bottom_most_index])
+        corner_minerals = (mineral_field_list[left_most_index if 0==chosen_index%2 else right_most_index], mineral_field_list[top_most_index if 0==chosen_index//2 else bottom_most_index])
         circles = [(*corner_minerals[i], MINERAL_DISTANCE_FROM_TOWNHALL[i]) for i in (0, 1) ]
         intersection_points = [ (int(round(x)), int(round(y))) for (x, y) in self._calculate_circles_intersection_points(*circles)]
             
@@ -655,9 +624,9 @@ class GeneralAgent(base_agent.BaseAgent):
         candidate_point = intersection_points[0]
       else:
         candidate_point = intersection_points[1]
-      if True == self._check_resource_overlapping_townhall(SCREEN_SHAPE, candidate_point, mineral_source_list, vespene_source_list):
+      if True == self._check_resource_overlapping_townhall(SCREEN_SHAPE, candidate_point, mineral_field_list, vespene_geyser_list):
         if DEBUG_OUTPUT:
-          self._draw_debug_figure(obs, candidate_point,  mineral_source_list, vespene_source_list, 'calculated_%02d_%02d'% (candidate_point[0], candidate_point[1]))
+          self._draw_debug_figure(obs, candidate_point,  mineral_field_list, vespene_geyser_list, 'calculated_%02d_%02d'% (candidate_point[0], candidate_point[1]))
         nearest_point = candidate_point
         nearest_distance = None        
         direction_offset = (1-chosen_index%2*2, 1-chosen_index//2*2)
@@ -671,15 +640,15 @@ class GeneralAgent(base_agent.BaseAgent):
             flg_column = 0
             for x in horizontal_range:
               chosen_point = (x, y)
-              if not self._check_resource_overlapping_townhall(SCREEN_SHAPE, chosen_point, mineral_source_list, vespene_source_list):
-                chosen_img = self._draw_debug_figure(obs, chosen_point, mineral_source_list, vespene_source_list, 'choose_%02d_%02d_valid' % (x, y))
+              if not self._check_resource_overlapping_townhall(SCREEN_SHAPE, chosen_point, mineral_field_list, vespene_geyser_list):
+                chosen_img = self._draw_debug_figure(obs, chosen_point, mineral_field_list, vespene_geyser_list, 'choose_%02d_%02d_valid' % (x, y))
                 subfig[flg_row][flg_column].set_title('Yes', fontdict={'fontsize': 8, 'fontweight': 'medium'})
                 distance = self.calculate_distance_square(barycenter, chosen_point)
                 if nearest_distance is None or distance < nearest_distance:
                   nearest_point = chosen_point
                   nearest_distance = distance
               else:
-                chosen_img = self._draw_debug_figure(obs, chosen_point, mineral_source_list, vespene_source_list, 'choose_%02d_%02d_invalid' % (x, y))
+                chosen_img = self._draw_debug_figure(obs, chosen_point, mineral_field_list, vespene_geyser_list, 'choose_%02d_%02d_invalid' % (x, y))
                 subfig[flg_row][flg_column].set_title('No', fontdict={'fontsize': 8, 'fontweight': 'medium'})
               subfig[flg_row][flg_column].imshow(chosen_img)
               flg_column += 1
@@ -687,12 +656,12 @@ class GeneralAgent(base_agent.BaseAgent):
           filename = 'debug_choose_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
           plt.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
           plt.close(fig)
-          self._draw_debug_figure(obs, nearest_point,  mineral_source_list, vespene_source_list, 'choose_%02d_%02d_final' % (nearest_point[0], nearest_point[1]))
+          self._draw_debug_figure(obs, nearest_point,  mineral_field_list, vespene_geyser_list, 'choose_%02d_%02d_final' % (nearest_point[0], nearest_point[1]))
         else:
           for y in vertical_range:
             for x in horizontal_range:
               chosen_point = (x, y)
-              if not self._check_resource_overlapping_townhall(SCREEN_SHAPE, chosen_point, mineral_source_list, vespene_source_list):
+              if not self._check_resource_overlapping_townhall(SCREEN_SHAPE, chosen_point, mineral_field_list, vespene_geyser_list):
                 distance = self.calculate_distance_square(barycenter, chosen_point)
                 if nearest_distance is None or distance < nearest_distance:
                   nearest_point = chosen_point
@@ -700,9 +669,11 @@ class GeneralAgent(base_agent.BaseAgent):
         candidate_point = nearest_point
       else:
         if DEBUG_OUTPUT:
-          self._draw_debug_figure(obs, candidate_point,  mineral_source_list, vespene_source_list, 'calculated_%02d_%02d_final'% (candidate_point[0], candidate_point[1]))
+          self._draw_debug_figure(obs, candidate_point,  mineral_field_list, vespene_geyser_list, 'calculated_%02d_%02d_final'% (candidate_point[0], candidate_point[1]))
     else:
       direction_offset = None
+      
+      MINERAL_DIAGONAL_DISTANCE_FROM_TOWNHALL = math.sqrt(MINERAL_DISTANCE_FROM_TOWNHALL[1]**2+MINERAL_DISTANCE_FROM_TOWNHALL[1]**2)
       if mineral_region[0] < TOWNHALL_DIAMETER:    # 礦區像直的(狹長)
         center_left = (left_most, vertical_middle)
         center_right = (right_most, vertical_middle)
@@ -715,8 +686,8 @@ class GeneralAgent(base_agent.BaseAgent):
           center = center_right
           direction_offset = (1, 0)
         if intersection_points is None:
-          corner_minerals = (mineral_source_list[top_most_index], mineral_source_list[bottom_most_index])
-          circles = [(*corner_minerals[i], math.sqrt(MINERAL_DISTANCE_FROM_TOWNHALL[1]**2+MINERAL_DISTANCE_FROM_TOWNHALL[1]**2)) for i in (0, 1) ]
+          corner_minerals = (mineral_field_list[top_most_index], mineral_field_list[bottom_most_index])
+          circles = [(*corner_minerals[i], MINERAL_DIAGONAL_DISTANCE_FROM_TOWNHALL) for i in (0, 1) ]
       elif mineral_region[1] < TOWNHALL_DIAMETER:    # 礦區像橫的(扁平)    
         center_top = (horizontal_middle, top_most)
         center_bottom = (horizontal_middle, bottom_most)
@@ -729,8 +700,8 @@ class GeneralAgent(base_agent.BaseAgent):
           center = center_bottom
           direction_offset = (0, 1)      
         if intersection_points is None:
-          corner_minerals = (mineral_source_list[left_most_index], mineral_source_list[right_most_index])
-          circles = [(*corner_minerals[i], math.sqrt(MINERAL_DISTANCE_FROM_TOWNHALL[0]**2+MINERAL_DISTANCE_FROM_TOWNHALL[1]**2)) for i in (0, 1) ]
+          corner_minerals = (mineral_field_list[left_most_index], mineral_field_list[right_most_index])
+          circles = [(*corner_minerals[i], MINERAL_DIAGONAL_DISTANCE_FROM_TOWNHALL) for i in (0, 1) ]
       if intersection_points is None:
         intersection_points = [ (int(round(x)), int(round(y))) for (x, y) in self._calculate_circles_intersection_points(*circles)]
 
@@ -741,11 +712,11 @@ class GeneralAgent(base_agent.BaseAgent):
       else:
         candidate_point = intersection_points[1]
       if DEBUG_OUTPUT:
-        self._draw_debug_figure(obs, candidate_point,  mineral_source_list, vespene_source_list, 'calculated_%02d_%02d'% (candidate_point[0], candidate_point[1]))
-      while True == self._check_resource_overlapping_townhall(SCREEN_SHAPE, candidate_point, mineral_source_list, vespene_source_list):
+        self._draw_debug_figure(obs, candidate_point,  mineral_field_list, vespene_geyser_list, 'calculated_%02d_%02d'% (candidate_point[0], candidate_point[1]))
+      while True == self._check_resource_overlapping_townhall(SCREEN_SHAPE, candidate_point, mineral_field_list, vespene_geyser_list):
         candidate_point = (candidate_point[0]+direction_offset[0], candidate_point[1]+direction_offset[1])
       if DEBUG_OUTPUT:
-        self._draw_debug_figure(obs, candidate_point,  mineral_source_list, vespene_source_list, 'choose_%02d_%02d_final' % (candidate_point[0], candidate_point[1]))
+        self._draw_debug_figure(obs, candidate_point, mineral_field_list, vespene_geyser_list, 'choose_%02d_%02d_final' % (candidate_point[0], candidate_point[1]))
     return candidate_point
 
 
@@ -820,49 +791,18 @@ class GeneralAgent(base_agent.BaseAgent):
     
   def _speculate_resource_regions(self, obs):
     player_relative = obs.observation.feature_minimap.player_relative
-    #neighbor_distance_x = self.MinimapSize[0]/4.0/self.ViewportSize[0]
-    #neighbor_distance_y = self.MinimapSize[1]/4.0/self.ViewportSize[1]
-    #neighbor_distance_squre = neighbor_distance_x**2 + neighbor_distance_y**2
-    neighbor_distance_squre = 8
-    grouped_points = self.aggregate_points(player_relative == features.PlayerRelative.NEUTRAL, neighbor_distance_squre)
+    NEIGHBOR_DISTANCE_SQURE = 8
+    grouped_points = self.aggregate_points(player_relative == features.PlayerRelative.NEUTRAL, NEIGHBOR_DISTANCE_SQURE)
     return_locs = []
     for exist_serial in grouped_points.keys():
-      points_count = len(grouped_points[exist_serial])
-      if points_count > 0:
-        x = []
-        y = []
-        for p in grouped_points[exist_serial]:
-          x.append(p[0])
-          y.append(p[1])
-        x_arr = numpy.array(x)
-        y_arr = numpy.array(y)
-        center_location = [int(round((x_arr.max()+x_arr.min())/2.0)), int(round((y_arr.max()+y_arr.min())/2.0))]
-        #center_location = [int(round(x_arr.mean())), int(round(y_arr.mean()))]
-        #loop = 3
-        #while loop>0:
-        #  expect_point_count = 0
-        #  sum_x = 0
-        #  sum_y = 0
-        #  for index in range(points_count):
-        #    distance = self.calculate_distance_square([x[index], y[index]], center_location)
-        #    if distance>0:
-        #      sqrt_distance = math.sqrt(distance)
-        #      if distance < 8:
-        #        sum_x += (center_location[0]-x[index]) / sqrt_distance * 6 +x[index]
-        #        sum_y += (center_location[1]-y[index]) / sqrt_distance * 6 +y[index]
-        #        expect_point_count += 1
-        #      elif distance >= 49:
-        #        sum_x += (center_location[0]-x[index]) / sqrt_distance * 5 +x[index]
-        #        sum_y += (center_location[1]-y[index]) / sqrt_distance * 5 +y[index]
-        #        expect_point_count += 1         
-        #  if expect_point_count > 0:
-        #    center_location[0] = int(sum_x / expect_point_count)
-        #    center_location[1] = int(sum_y / expect_point_count)
-        #    loop -= 1
-        #  else:  
-        #    break
-        return_locs.append(tuple(center_location))
+      if len(grouped_points[exist_serial]) > 0:
+        point_arr = numpy.array(list(grouped_points[exist_serial]))
+        left, top = point_arr.min(axis=0)
+        right, bottom = point_arr.max(axis=0)
+        center = (int(round((left+right)/2.0)), int(round((top+bottom)/2.0)) )
+        return_locs.append(center)
     return return_locs
+
 
   def _execute_returning_harvest(self, obs, townhall_location):
     if FUNCTIONS.Harvest_Return_quick.id in obs.observation.available_actions:
@@ -870,6 +810,8 @@ class GeneralAgent(base_agent.BaseAgent):
       return FUNCTIONS.Harvest_Return_quick('now')
     else:
       return FUNCTIONS.Move_screen('now', townhall_location)
+
+      
   def _select_gathering_mineral_worker(self, obs, townhall_location):
     unit_type = obs.observation.feature_screen.unit_type    
     selected = obs.observation.feature_screen.selected
@@ -889,8 +831,10 @@ class GeneralAgent(base_agent.BaseAgent):
       base_axis_vec = (base_axis_vec[0]/base_axis_len, base_axis_vec[1]/base_axis_len)
       base_axis.append((base_axis_vec, base_axis_len))
       
-    square_length = _UnitNumeric[self.TOWNHALL_TYPES[0]]['grid_count']
-    double_square_length = square_length*2
+    GRID_COUNT_townhall = self._get_grid_count_townhall()
+    RADIUS_townhall = int(math.floor(self.GRID_SIDE_LENGTH*GRID_COUNT_townhall/2.0))
+    NEAR_townhall = RADIUS_townhall+self.GRID_SIDE_LENGTH
+    FAR_townhall = RADIUS_townhall+self.GRID_SIDE_LENGTH*3
     
     for worker in worker_list:
       (worker_x, worker_y) = worker
@@ -917,7 +861,7 @@ class GeneralAgent(base_agent.BaseAgent):
       if gathering_vespene:
         continue
       distance = self.calculate_distance_square(worker, townhall_location)
-      if distance<=(double_square_length+2)**2 or distance>(double_square_length+10)**2:
+      if distance<=NEAR_townhall**2 or distance>FAR_townhall**2:
         continue
       #if worker_x < townhall_x-12 or worker_x > townhall_x+12 or worker_y < townhall_y-12 or worker_y > townhall_y+12:
       #  distance = self.calculate_distance_square(worker, townhall_location)
@@ -1067,7 +1011,7 @@ class GeneralAgent(base_agent.BaseAgent):
       first_townhall = townhall_location_list[0]
       townhall_location = first_townhall[0]
       townhall_size = (first_townhall[2][0]-first_townhall[1][0], first_townhall[2][1]-first_townhall[1][1])
-      townhall_grid_length = _UnitNumeric[unit_type_id]['grid_count']
+      townhall_grid_length = self._get_grid_count_townhall()
       
       #townhall_best_location = self._calculate_townhall_best_location(obs)
       world_absolute_coordinate = self.calculate_world_absolute_coordinate((self._current_camera, townhall_location))
