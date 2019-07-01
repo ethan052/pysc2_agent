@@ -6,7 +6,7 @@ MAP=Simple64
 ### PortAleksander(亞歷克桑德港)
 # MAP=PortAleksander
 ### NewRepugnancy(新生衝突點)
-# MAP=NewRepugnancy
+MAP=NewRepugnancy
 ### KingsCove(國王海灣)
 # MAP=KingsCove
 ### KairosJunction(凱羅斯交會點)
@@ -14,7 +14,7 @@ MAP=Simple64
 ### CyberForest(電子叢林)
 # MAP=CyberForest
 ### Automaton(自動化)
-MAP=Automaton
+# MAP=Automaton
 
 #AGENT1_CLS=pysc2.agents.yiren.idle_agent.IdleAgent1
 AGENT1_CLS=pysc2.agents.yiren.yiren_template.PracticeRandomRaceAgent
