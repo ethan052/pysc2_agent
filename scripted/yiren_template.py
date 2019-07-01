@@ -64,6 +64,7 @@ class GeneralAgent(base_agent.BaseAgent):
     self.CameraBias = None
     self.FirstViewport = None
     self.NeutralMinimap = None
+    self.FirstScreen = {}
     self.CameraBoundary = [None, None]
     self.AccumulatedOffset = [[0], [0]]
     self.MapShape = (0, 0)
@@ -73,14 +74,15 @@ class GeneralAgent(base_agent.BaseAgent):
     # useful hidden states for strategy
     self._world_coordinate = {}
     self._structures = {}
-    self._neutral_regions = set()
-    self._speculated_resource_region_list = []
+    self._neutral_regions = {}
+    self._ordered_regions = []
+    self._shifted_camera_for_townhall = {}
+    self._opposite_resource_region_camera = {}
     self._calculated_resource_region_list = []
     self._occupied_resource_regions = {}
     self._holding_resource_region_list = []
     self._height_map_on_camera = {}
     # for debug_accumulate
-    self._resource_image = None
     # scheduled
     self._scheduled_actions_on_camera = {}
     self._scheduled_actions_on_unit = {}
@@ -183,19 +185,6 @@ class GeneralAgent(base_agent.BaseAgent):
 
 
   @classmethod
-  def _create_resource_density(cls, mineral_field_list, vespene_geyser_list):
-    SCREEN_SHAPE = (self.ScreenSize[1], self.ScreenSize[0])
-    density = numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8)
-    for center in mineral_field_list:
-      circle_mask = cls.create_mineral_circle_mask(SCREEN_SHAPE, center)
-      density[circle_mask] += 1
-    for center in vespene_geyser_list:
-      circle_mask = cls.create_circle_mask(SCREEN_SHAPE, center, 5**2+2**2)
-      density[circle_mask] += 1
-    return density
-
-
-  @classmethod
   def create_mineral_field_list_mask(cls, screen_shape, mineral_field_list):
     resource_mask = numpy.full(screen_shape, False)
     for center in mineral_field_list:
@@ -234,6 +223,19 @@ class GeneralAgent(base_agent.BaseAgent):
 
     intersection_points = [(secant_middle_x-direct_vec[1]*t, secant_middle_y+direct_vec[0]*t) for t in (positive_parametric, negative_parametric)]
     return intersection_points
+
+
+  def _create_resource_density(self, mineral_field_list, vespene_geyser_list):
+    SCREEN_SHAPE = (self.ScreenSize[1], self.ScreenSize[0])
+    density = numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8)
+    for center in mineral_field_list:
+      circle_mask = self.create_mineral_circle_mask(SCREEN_SHAPE, center)
+      density[circle_mask] += 1
+    for center in vespene_geyser_list:
+      circle_mask = self.create_circle_mask(SCREEN_SHAPE, center, 5**2+2**2)
+      density[circle_mask] += 1
+    return density
+
 
   def create_townhall_margin_mask(self, screen_shape, townhall_location):
     GRID_COUNT_townhall = self._get_grid_count_townhall()
@@ -573,9 +575,6 @@ class GeneralAgent(base_agent.BaseAgent):
         image[center[1], center[0]] = (0, 0, 255)
       for center in vespene_geyser_list:
         image[center[1], center[0]] = (0, 255, 0)
-      p = [self.AccumulatedOffset[i][self._current_camera[i]-self.CameraBoundary[0][i]] for i in range(2)]
-      #(pixel_left, pixel_top) = tuple(p)
-      #self.resource_image[pixel_top:pixel_top+self.ScreenSize[1], pixel_left:pixel_left+self.ScreenSize[0]] = image[:,:]
       filename = 'debug_center_%02d_%02d_.png' % (self._current_camera[0], self._current_camera[1])
       skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, image)
 
@@ -807,18 +806,45 @@ class GeneralAgent(base_agent.BaseAgent):
     mineral_field_list, vespene_geyser_list = self._get_resource_screen(unit_type, unit_density, player_relative, debug_output)
     townhall_best_location = self._calculate_townhall_best_location(mineral_field_list, vespene_geyser_list, debug_output)
     world_coordinate = self.calculate_world_absolute_coordinate((self._current_camera, townhall_best_location))
-    local_coordinate = self.calculate_local_coordinate(world_coordinate)
-    self._calculated_resource_region_list.append( [local_coordinate[0], local_coordinate[1]] )
-    #self._calculated_resource_region_list.append( [local_coordinate[0], None] )
+    local_coordinate = self.calculate_local_coordinate(world_coordinate)    
+    # TODO: 轉換資源區座標並且記錄
+    resource_dict = {'mineral':mineral_field_list, 'vespene':vespene_geyser_list}
+    self._neutral_regions[local_coordinate[0]] = {'townhall': [local_coordinate[1]]}
+    be_converted = True
+    for k in resource_dict.keys():
+      converted_coordinate_list = []
+      for center in resource_dict[k]:
+        world_coordinate = numpy.array(self.calculate_world_absolute_coordinate((self._current_camera, center)))
+        camera_offset = numpy.array(local_coordinate[0]) - numpy.array(self.CameraBoundary[0])
+        location_base = numpy.array([self.AccumulatedOffset[i][camera_offset[i]] for i in range(2)])      
+        converted_local = tuple(world_coordinate - location_base)
+        (x, y) = converted_local
+        if x<0 or x>=self.ScreenSize[0] or y<0 or y>=self.ScreenSize[1]:
+          be_converted = False
+          break
+        converted_coordinate_list.append(converted_local)
+      if not be_converted:
+        break
+      self._neutral_regions[local_coordinate[0]][k] = converted_coordinate_list
+    if not be_converted:
+      del self._neutral_regions[local_coordinate[0]]
+      local_coordinate = (self._current_camera, townhall_best_location)
+      self._neutral_regions[local_coordinate[0]] = {'townhall': [local_coordinate[1]]}
+      for k in resource_dict.keys():
+        self._neutral_regions[local_coordinate[0]][k] = resource_dict[k]
+    self._shifted_camera_for_townhall[self._current_camera] = local_coordinate[0]
+    self._ordered_regions.append(local_coordinate[0])
+    resource_dict = {'mineral':mineral_field_list, 'vespene':vespene_geyser_list}
 
-    #self._calculated_resource_region_list.append( [local_coordinate[0], None] )
-    #self._calculated_resource_region_list.append( [self._current_camera, None] )
+    self._calculated_resource_region_list.append( [local_coordinate[0], local_coordinate[1]] )
     count_remaining_schedule = len(scheduled_camera)
     if count_remaining_schedule > 1:
       next_camera = scheduled_camera.pop()
       self._schedule_job( next_camera , None, ['_record_townhall_best_location', self, [scheduled_camera]], True)
     elif 1 == count_remaining_schedule:
       self._draw_debug_world_height_map()
+      self._draw_debug_world_resource()
+      # TODO: 可以畫出資源區
       next_camera = scheduled_camera.pop()
     else:
       return FUNCTIONS.no_op()
@@ -826,8 +852,7 @@ class GeneralAgent(base_agent.BaseAgent):
 
 
   def _record_townhall_best_locations(self, obs):
-    resource_region_list = self._speculate_resource_regions()
-    #self.resource_image = skimage_color.gray2rgb(numpy.zeros(self.MapShape, dtype=numpy.uint8))
+    resource_region_list = self._speculate_resource_regions()    
     NEIGHBOR_DISTANCE_SQURE = self.ViewportSize[0]*self.ViewportSize[1]*9.0/64.0
     center_minimap = ((self.CameraBoundary[1][0]+self.CameraBoundary[0][0])/2.0, (self.CameraBoundary[1][1]+self.CameraBoundary[0][1])/2.0)
     # 檢查礦區是否點(旋轉)對稱
@@ -875,10 +900,10 @@ class GeneralAgent(base_agent.BaseAgent):
           break
       if len(remaining_region)==0:
         symmetry_style[axis_index] = opposite_mapping
-    symmetry_debug = [ False if d is None else True for d in symmetry_style ]
+    symmetry_flag = [ False if d is None else True for d in symmetry_style ]
     txt_filename = 'debug_symmetry.json.txt'
     with open(self.DEBUG_OUTPUT_PATH + '/%s' % txt_filename, "w") as outfile:
-      json.dump({'horizontal_symmetry':symmetry_debug[0], 'vertical_symmetry':symmetry_debug[1], 'rotational':symmetry_debug[2]}, outfile)
+      json.dump({'horizontal_symmetry':symmetry_flag[0], 'vertical_symmetry':symmetry_flag[1], 'rotational':symmetry_flag[2]}, outfile)
     
     near_region_list = deque()
     far_region_list = deque()
@@ -977,28 +1002,27 @@ class GeneralAgent(base_agent.BaseAgent):
             if nearest_distance is None or distance < nearest_distance:
               nearest_distance = distance
               nearest_region = region_coordinate
+
+    first_camera = (self.FirstViewport[0][0]+self.ViewportCenter[0], self.FirstViewport[0][1]+self.ViewportCenter[1])
+    opposite_region_list = list(far_region_list)
+    neighbor_region_list = list(near_region_list)
+    neighbor_region_list[0] = first_camera
+    unit_type = self.FirstScreen['unit_type']
+    unit_density = self.FirstScreen['unit_density']
+    player_relative = self.FirstScreen['player_relative']
+    mineral_field_list, vespene_geyser_list = self._get_resource_screen(unit_type, unit_density, player_relative, False)
+    self._neutral_regions[first_camera]['mineral'] = mineral_field_list
+    self._neutral_regions[first_camera]['vespene'] = vespene_geyser_list
+    if symmetry_flag[2] or symmetry_flag[1] or symmetry_flag[0]:
+      for region_index in range(len(neighbor_region_list)):
+        neighbor_region = neighbor_region_list[region_index]
+        opposite_region = opposite_region_list[region_index]      
+        self._opposite_resource_region_camera[neighbor_region] = opposite_region
     far_region_list.reverse()
-    reordered_region_list = list(near_region_list) + list(far_region_list)
+    reordered_region_list = neighbor_region_list + list(far_region_list)
+    
 
-    #holding_index = None
-    #for i in range(len(resource_region_list)):
-    #  resource_region_camera = resource_region_list[i]
-    #  if self.FirstViewport[0][0]<resource_region_camera[0] and resource_region_camera[0]<self.FirstViewport[1][0] and self.FirstViewport[0][1]<resource_region_camera[1] and resource_region_camera[1]<self.FirstViewport[1][1]:
-    #    holding_index = i
-    #    break
-
-    #if holding_index is not None:
-    #  referenced_coordinate = resource_region_list[holding_index]
-    #  self._speculated_resource_region_list.append(referenced_coordinate)
-    #  resource_region_list.pop(holding_index)
-    #  distace_square_values = []
-    #  for i in range(len(resource_region_list)):
-    #    distace_square_value = self.calculate_distance_square(referenced_coordinate, resource_region_list[i])
-    #    distace_square_values.append((distace_square_value, i))
-    #  for (distace_square_value, i) in sorted(distace_square_values):
-    #    self._speculated_resource_region_list.append(resource_region_list[i])
-
-    scheduled_camera = [self._current_camera] + reordered_region_list[:0:-1]
+    scheduled_camera = [self._current_camera] + reordered_region_list[:0:-1]    
     next_camera = scheduled_camera.pop()
     self._schedule_job( next_camera , None, ['_record_townhall_best_location', self, [scheduled_camera]], True)
     return self._execute_moving_camera(obs, next_camera)
@@ -1023,7 +1047,22 @@ class GeneralAgent(base_agent.BaseAgent):
 
 
   def _draw_debug_world_resource(self, filename='debug_world_resource.png'):
-    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, self.resource_image)
+    SCREEN_SHAPE = (self.ScreenSize[1], self.ScreenSize[0])
+    resource_image = skimage_color.gray2rgb(numpy.zeros(self.MapShape, dtype=numpy.uint8))
+    for camera_minimap in self._neutral_regions.keys():
+      mineral_field_list = self._neutral_regions[camera_minimap]['mineral']
+      vespene_geyser_list = self._neutral_regions[camera_minimap]['vespene']
+      density = self._create_resource_density(mineral_field_list, vespene_geyser_list)
+      image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
+      self.set_color_in_density_image(image, density)
+      for center in mineral_field_list:
+        image[center[1]-1:center[1]+1, center[0]-1:center[0]+1] = (0, 0, 170)
+      for center in vespene_geyser_list:
+        image[center[1]-1:center[1]+2, center[0]-1:center[0]+2] = (0, 170, 0)      
+      p = [self.AccumulatedOffset[i][camera_minimap[i]-self.CameraBoundary[0][i]] for i in range(2)]
+      (pixel_left, pixel_top) = tuple(p)
+      resource_image[pixel_top:pixel_top+self.ScreenSize[1], pixel_left:pixel_left+self.ScreenSize[0]] = image[:,:]
+    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, resource_image)
 
 
   def _calculate_world_map(self, obs):
@@ -1352,6 +1391,9 @@ class GeneralAgent(base_agent.BaseAgent):
       self._calculated_resource_region_list.append( (self._current_camera, townhall_location) )
       self._occupied_resource_regions[self._current_camera] = {'owner':owner}
       self._holding_resource_region_list.append( (self._current_camera, townhall_location) )
+      self._neutral_regions[self._current_camera] = {'townhall': [townhall_location]}
+      self._shifted_camera_for_townhall[self._current_camera] = self._current_camera
+      self._ordered_regions.append(self._current_camera)
       #self._world_coordinate[owner][unit_type_id] = [world_absolute_coordinate]
       #self._structures[world_absolute_coordinate] = {'owner':owner, 'unit_type':unit_type_id}
       self._expected_selected = unit_type_id
@@ -1370,6 +1412,9 @@ class GeneralAgent(base_agent.BaseAgent):
         if self.FirstViewport is None:
           self.FirstViewport = viewport
           self.NeutralMinimap = numpy.array(obs.observation.feature_minimap.player_relative)
+          self.FirstScreen['unit_type'] = numpy.array(obs.observation.feature_screen.unit_type)
+          self.FirstScreen['unit_density'] = numpy.array(obs.observation.feature_screen.unit_density)
+          self.FirstScreen['player_relative'] = numpy.array(obs.observation.feature_screen.player_relative)
           self.ViewportSize =  (self.FirstViewport[1][0]-self.FirstViewport[0][0]+1, self.FirstViewport[1][1]-self.FirstViewport[0][1]+1)
           screen_height_map = obs.observation.feature_screen.height_map
           self.ScreenSize = (screen_height_map.shape[1], screen_height_map.shape[0])
