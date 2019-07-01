@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import math
+import json
 import numpy
 from collections import deque
 from skimage.feature import canny
@@ -57,10 +58,15 @@ class GeneralAgent(base_agent.BaseAgent):
   def reset(self):
     # game constants, detected when the game starts
     self.ViewportSize = (0, 0)
+    self.ViewportCenter = (0, 0)
     self.ScreenSize = (0, 0)
     self.MinimapSize = (0, 0)
-    self.CameraOffset = None
+    self.CameraBias = None
     self.FirstViewport = None
+    self.NeutralMinimap = None
+    self.CameraBoundary = [None, None]
+    self.AccumulatedOffset = [[0], [0]]
+    self.MapShape = (0, 0)
     # useful hidden states    
     self._current_camera = None
     self._expected_selected = None
@@ -73,53 +79,44 @@ class GeneralAgent(base_agent.BaseAgent):
     self._occupied_resource_regions = {}
     self._holding_resource_region_list = []
     self._height_map_on_camera = {}
+    # for debug_accumulate
+    self._resource_image = None
     # scheduled
     self._scheduled_actions_on_camera = {}
     self._scheduled_actions_on_unit = {}
 
 
-  def calculate_world_relative_coordinate(self, local_coordinate1, local_coordinate2):
-    (camera_minimap1, location_screen1) = local_coordinate1
-    (camera_minimap2, location_screen2) = local_coordinate2
-    viewport_size = self.ViewportSize
-    screen_size = self.ScreenSize
-    relative_minimap = (camera_minimap2[0]-camera_minimap1[0], camera_minimap2[1]-camera_minimap1[1])
-    # offset_screen = screen_size / viewport_size * offset_minimap
-    relative_screen = ( int(round(screen_size[0]*relative_minimap[0]/viewport_size[0])), int(round(screen_size[1]*relative_minimap[1]/viewport_size[1])))
-    relative_world = ( location_screen2[0]+relative_screen[0]-location_screen1[0], location_screen2[1]+relative_screen[1]-location_screen1[1])
-    return relative_world
-
-
   def calculate_world_absolute_coordinate(self, local_coordinate):
-    viewport_size = self.ViewportSize
-    camera_offset = self.CameraOffset
-    viewport_center = (int(math.floor((viewport_size[0]+1)/2)), int(math.floor((viewport_size[1]+1)/2)))
-    camera_minimap = ((viewport_center[0]-camera_offset[0]), (viewport_center[1]-camera_offset[1]))
-    return self.calculate_world_relative_coordinate((camera_minimap, (0, 0)), local_coordinate)
+    (camera_minimap, location_screen) = local_coordinate
+    p = [self.AccumulatedOffset[i][camera_minimap[i]-self.CameraBoundary[0][i]]+location_screen[i] for i in range(2)]
+    return tuple(p)
+
+
+  def calculate_world_relative_coordinate(self, local_coordinate1, local_coordinate2):
+    world_coordinate1 = self.calculate_world_absolute_coordinate(local_coordinate1)
+    world_coordinate2 = self.calculate_world_absolute_coordinate(local_coordinate2)
+    return (world_coordinate2[0]-world_coordinate1[0], world_coordinate2[1]-world_coordinate1[1])
 
 
   def calculate_local_coordinate(self, world_coordinate):
-    screen_size = self.ScreenSize
-    estimative_referenced_world = (world_coordinate[0]-int(math.floor((screen_size[0]+1)/2)), world_coordinate[1]-int(math.floor((screen_size[1]+1)/2)))
     viewport_size = self.ViewportSize
-    minimap_offset_x = int(math.floor(estimative_referenced_world[0]*viewport_size[0]/screen_size[0]))
-    minimap_offset_y = int(math.floor(estimative_referenced_world[1]*viewport_size[1]/screen_size[1]))
-    boundary = (self.MinimapSize[0]-viewport_size[0], self.MinimapSize[1]-viewport_size[1])
-    if minimap_offset_x < 0:
-      minimap_offset_x = 0
-    elif minimap_offset_x > boundary[0]:
-      minimap_offset_x = boundary[0]
-    if minimap_offset_y < 0:
-      minimap_offset_y = 0
-    elif minimap_offset_y > boundary[1]:
-      minimap_offset_y = boundary[1]
-    viewport_center = (int(math.floor((viewport_size[0]+1)/2)), int(math.floor((viewport_size[1]+1)/2)))
-    origin_minimap = ((viewport_center[0]-self.CameraOffset[0]), (viewport_center[1]-self.CameraOffset[1]))      
-    camera_minimap = (origin_minimap[0]+minimap_offset_x, origin_minimap[1]+minimap_offset_y)
-    calculated_referenced_world = self.calculate_world_absolute_coordinate( (camera_minimap, (0,0) ) )
-    location_screen = (world_coordinate[0]-calculated_referenced_world[0], world_coordinate[1]-calculated_referenced_world[1])
+    screen_size = self.ScreenSize
+    minimap_size = self.MinimapSize
+    viewport_center = self.ViewportCenter
+    
+    horizon_offset = numpy.array(self.AccumulatedOffset[0])
+    valid_x_mask = numpy.logical_and( (horizon_offset<=world_coordinate[0]), (horizon_offset>world_coordinate[0]-self.ScreenSize[0]) )
+    location_base_x = horizon_offset[valid_x_mask][ abs(horizon_offset[valid_x_mask]-(world_coordinate[0]-self.ScreenSize[0]//2)).argmin() ]
+    camera_offset_x, = numpy.where(horizon_offset==location_base_x)
+    vertical_offset = numpy.array(self.AccumulatedOffset[1])
+    valid_y_mask = numpy.logical_and( (vertical_offset<=world_coordinate[1]), (vertical_offset>world_coordinate[1]-self.ScreenSize[1]) )
+    location_base_y = vertical_offset[valid_y_mask][ abs(vertical_offset[valid_y_mask]-(world_coordinate[1]-self.ScreenSize[1]//2)).argmin() ]
+    camera_offset_y, = numpy.where(vertical_offset==location_base_y)
+        
+    camera_minimap = (self.CameraBoundary[0][0]+camera_offset_x[0], self.CameraBoundary[0][1]+camera_offset_y[0])
+    location_screen = (world_coordinate[0]-location_base_x, world_coordinate[1]-location_base_y)
     return (camera_minimap, location_screen)
-
+    
 
   def _schedule_job(self, camera_minimap, unit_type_id, function_call_arguments, preemptive=False):
     if unit_type_id is None or 0 == unit_type_id:
@@ -160,6 +157,7 @@ class GeneralAgent(base_agent.BaseAgent):
     masked_array[mask] = True
     return masked_array
 
+
   @classmethod
   def create_mineral_circle_mask(cls, screen_shape, center):
     circle_mask = numpy.full(screen_shape, False)
@@ -194,6 +192,7 @@ class GeneralAgent(base_agent.BaseAgent):
       (vespene_right, vespene_bottom) = (vespene_x+4, vespene_y+4)
       resource_mask[vespene_top:vespene_bottom+1, vespene_left:vespene_right+1] = True
     return resource_mask
+
       
   @classmethod
   def _calculate_circles_intersection_points(cls, circle1, circle2):
@@ -216,8 +215,7 @@ class GeneralAgent(base_agent.BaseAgent):
   def create_townhall_margin_mask(self, screen_shape, townhall_location):
     GRID_COUNT_townhall = self._get_grid_count_townhall()
     (LEFT, TOP, RIGHT, BOTTOM) = range(4)
-    
-    
+        
     RADII = [self.GRID_SIDE_LENGTH*2, self.GRID_SIDE_LENGTH*4, self.GRID_SIDE_LENGTH*5, self.GRID_SIDE_LENGTH*6, self.GRID_SIDE_LENGTH*6+1]
     values = []
     for radius in RADII:
@@ -259,7 +257,7 @@ class GeneralAgent(base_agent.BaseAgent):
     for new_p in point_list:
       related_serial = set()
       for exist_serial in grouped_points.keys():
-        for old_p in grouped_points[exist_serial]:
+        for old_p in list(grouped_points[exist_serial]):
           if cls.calculate_distance_square(old_p, new_p) <= neighbor_distance_squre:
             related_serial.add(exist_serial)
             break
@@ -343,6 +341,7 @@ class GeneralAgent(base_agent.BaseAgent):
       return_locs.extend(self.get_locations_screen(unit_type_mask, 2, tuple_form))
     return return_locs
 
+
   def _detect_mineral_screen(self, union_mineral_mask):
     if union_mineral_mask.any():
       y, x = union_mineral_mask.nonzero()
@@ -373,19 +372,16 @@ class GeneralAgent(base_agent.BaseAgent):
     image[(density==4)] = (63, 63, 63)
 
     
-  def _get_resource_screen(self, obs, debug_output=False):
+  def _get_resource_screen(self, unit_type, unit_density, player_relative, debug_output=False):
     DEBUG_OUTPUT = debug_output
     SCREEN_SHAPE = (self.ScreenSize[1], self.ScreenSize[0])
-    unit_type = obs.observation.feature_screen.unit_type    
-    unit_density = obs.observation.feature_screen.unit_density
-    player_relative = obs.observation.feature_screen.player_relative
     neutral_mask = (player_relative == features.PlayerRelative.NEUTRAL)
 
     unanalyzed_density = numpy.array(unit_density)
     unanalyzed_density[numpy.logical_not(neutral_mask)] = 0
 
-    if DEBUG_OUTPUT:
-      fig0, (ax1, ax2, ax3, ax4) = plt.subplots(ncols=4, nrows=1, sharex=True, sharey=True, figsize=(6, 2))
+    if DEBUG_OUTPUT:      
+      fig0, (ax1, ax2, ax3, ax4) = plt.subplots(ncols=4, nrows=1, sharex=True, sharey=True, figsize=(8, 2))
       image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
       self.set_color_in_density_image(image, unanalyzed_density)
       ax1.imshow(image)
@@ -398,7 +394,7 @@ class GeneralAgent(base_agent.BaseAgent):
 
     if DEBUG_OUTPUT:
       image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
-      image[union_mineral_mask] = (0, 0, 85)
+      image[union_mineral_mask] = (0, 0, 255)
       ax2.imshow(image)
 
     union_vespene_mask = numpy.full(SCREEN_SHAPE, False)
@@ -409,27 +405,28 @@ class GeneralAgent(base_agent.BaseAgent):
 
     if DEBUG_OUTPUT:
       image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
-      image[union_vespene_mask] = (0, 85, 0)
+      image[union_vespene_mask] = (0, 255, 0)
       ax3.imshow(image)
 
     union_resource_mask = numpy.logical_or(union_mineral_mask, union_vespene_mask)
 
     if DEBUG_OUTPUT:
       image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
-      image[numpy.logical_and(numpy.logical_not(union_resource_mask), (unanalyzed_density>0))] = (85, 0, 0)
+      image[numpy.logical_and(numpy.logical_not(union_resource_mask), (unanalyzed_density>0))] = (255, 0, 0)
       ax4.imshow(image)
       filename = 'debug_original_density_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
       plt.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
       plt.close(fig0)
         
     mineral_fragment_density = numpy.zeros(SCREEN_SHAPE, dtype=numpy.int32)
+    mineral_fragment_list = []
     mineral_field_list = []
 
     if DEBUG_OUTPUT:
       fig1, axs = plt.subplots(ncols=5, nrows=2, sharex=True, sharey=True, figsize=(10, 4))
       ax_index = 0
       image = skimage_color.gray2rgb(numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8))
-      self.set_color_in_density_image(image, unanalyzed_density)
+      self.set_color_in_density_image(image, unanalyzed_density)      
       axs[ax_index//5][ax_index%5].imshow(image)
       ax_index += 1
       
@@ -441,6 +438,17 @@ class GeneralAgent(base_agent.BaseAgent):
       if mineral_center is None:
         mineral_temp_mask = numpy.logical_or(union_mineral_mask, (mineral_fragment_density>0))
         mineral_center = self._detect_mineral_screen(mineral_temp_mask)
+      if mineral_center is None:
+        for old_fragment in mineral_fragment_list:
+          fragment_mask = numpy.logical_and((mineral_fragment_density>0), old_fragment)
+          mineral_temp_mask = numpy.logical_and(union_mineral_mask, numpy.logical_not(fragment_mask))
+          mineral_center = self._detect_mineral_screen(mineral_temp_mask)
+          if mineral_center is not None:
+            break
+          mineral_temp_mask = numpy.logical_and(union_mineral_mask, fragment_mask)
+          mineral_center = self._detect_mineral_screen(mineral_temp_mask)
+          if mineral_center is not None:
+            break
       if mineral_center is not None:
         mineral_field_list.append(mineral_center)
         circle_mask = self.create_mineral_circle_mask(SCREEN_SHAPE, mineral_center)
@@ -453,7 +461,15 @@ class GeneralAgent(base_agent.BaseAgent):
         mineral_density = numpy.array(unanalyzed_density)
         mineral_density[numpy.logical_not(union_mineral_mask)] = 0
         mineral_fragment_density[numpy.logical_and((mineral_fragment_density>0), circle_mask)] -= 1
-        mineral_fragment_density[(circle_mask)] += mineral_density[(circle_mask)]
+        count_fragments = len(mineral_fragment_list)
+        for i in range(count_fragments-1, -1, -1):
+          old_fragment = mineral_fragment_list[i]
+          if not (mineral_fragment_density[old_fragment]>0).any():
+            mineral_fragment_list.pop(i)
+        new_fragment = mineral_density[circle_mask]
+        if (new_fragment>0).any():
+          mineral_fragment_list.append(circle_mask)
+          mineral_fragment_density[numpy.logical_and((mineral_density>0),circle_mask)] += 1
         union_mineral_mask = (mineral_density>0)
       else:
         break
@@ -469,6 +485,17 @@ class GeneralAgent(base_agent.BaseAgent):
         if mineral_center is None:
           mineral_temp_mask = numpy.logical_or(numpy.logical_or(union_mineral_mask, vespene_overlapped_mask), stone_overlapped_mask)
           mineral_center = self._detect_mineral_screen(mineral_temp_mask)
+        if mineral_center is None:
+          for old_fragment in mineral_fragment_list:
+            fragment_mask = numpy.logical_and((mineral_fragment_density>0), old_fragment)
+            mineral_temp_mask = numpy.logical_and(union_mineral_mask, numpy.logical_not(fragment_mask))
+            mineral_center = self._detect_mineral_screen(mineral_temp_mask)
+            if mineral_center is not None:
+              break
+            mineral_temp_mask = numpy.logical_and(union_mineral_mask, fragment_mask)
+            mineral_center = self._detect_mineral_screen(mineral_temp_mask)
+            if mineral_center is not None:
+              break
         if mineral_center is not None:        
           mineral_field_list.append(mineral_center)
           circle_mask = self.create_mineral_circle_mask(SCREEN_SHAPE, mineral_center)
@@ -481,13 +508,21 @@ class GeneralAgent(base_agent.BaseAgent):
           mineral_density = numpy.array(unanalyzed_density)
           mineral_density[numpy.logical_not(union_mineral_mask)] = 0
           mineral_fragment_density[numpy.logical_and((mineral_fragment_density>0), circle_mask)] -= 1
-          mineral_fragment_density[(circle_mask)] += mineral_density[(circle_mask)]
+          count_fragments = len(mineral_fragment_list)
+          for i in range(count_fragments-1, -1, -1):
+            old_fragment = mineral_fragment_list[i]
+            if not (mineral_fragment_density[old_fragment]>0).any():
+              mineral_fragment_list.pop(i)
+          new_fragment = mineral_density[circle_mask]
+          if (new_fragment>0).any():
+            mineral_fragment_list.append(circle_mask)
+            mineral_fragment_density[numpy.logical_and((mineral_density>0),circle_mask)] += 1
           union_mineral_mask = (mineral_density>0)
         else:
           break
     if DEBUG_OUTPUT:
       filename = 'debug_mineral_gathering_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
-      plt.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
+      fig1.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
       plt.close(fig1)
 
     cloned_density = numpy.array(unit_density)
@@ -514,8 +549,10 @@ class GeneralAgent(base_agent.BaseAgent):
       for center in mineral_field_list:
         image[center[1], center[0]] = (0, 0, 255)
       for center in vespene_geyser_list:
-        image[center[1], center[0]] = (0, 255, 0)
-        
+        image[center[1], center[0]] = (0, 255, 0)      
+      p = [self.AccumulatedOffset[i][self._current_camera[i]-self.CameraBoundary[0][i]] for i in range(2)]
+      #(pixel_left, pixel_top) = tuple(p)
+      #self.resource_image[pixel_top:pixel_top+self.ScreenSize[1], pixel_left:pixel_left+self.ScreenSize[0]] = image[:,:]
       filename = 'debug_center_%02d_%02d_.png' % (self._current_camera[0], self._current_camera[1])
       skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, image)
               
@@ -530,6 +567,21 @@ class GeneralAgent(base_agent.BaseAgent):
     conflict_mask = numpy.logical_and(townhall_margin_mask, resource_mask)
     return conflict_mask.any()
 
+
+  def _draw_debug_camera_height(self, obs):
+    camera = obs.observation.feature_minimap.camera
+    height_map = obs.observation.feature_screen.height_map
+    camera_image = skimage_color.gray2rgb(numpy.zeros(camera.shape, dtype=numpy.uint8))
+    camera_image[(camera==1)] = (255,255,255)
+    camera_image[self._current_camera[1], self._current_camera[0]] = (255,0,0)
+    filename = 'debug_camera_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
+    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, camera_image)
+
+    height_image = skimage_color.gray2rgb(numpy.array(height_map, dtype=numpy.uint8))
+
+    filename = 'debug_height_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
+    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, height_image)
+    return FUNCTIONS.no_op()
     
   def _draw_debug_figure(self, obs, townhall_location,  mineral_field_list, vespene_geyser_list, append_filename='default'):
     unit_type = obs.observation.feature_screen.unit_type
@@ -570,8 +622,16 @@ class GeneralAgent(base_agent.BaseAgent):
   
         
   def _calculate_townhall_best_location(self, obs, debug_output=False):
-    DEBUG_OUTPUT = debug_output    
-    mineral_field_list, vespene_geyser_list = self._get_resource_screen(obs, False)
+    DEBUG_OUTPUT = debug_output
+    height_map = obs.observation.feature_screen.height_map
+    
+    if self._current_camera not in self._height_map_on_camera:
+      self._height_map_on_camera[self._current_camera] = numpy.array(height_map)
+    #self._draw_debug_camera_height(obs)
+    unit_type = obs.observation.feature_screen.unit_type    
+    unit_density = obs.observation.feature_screen.unit_density
+    player_relative = obs.observation.feature_screen.player_relative
+    mineral_field_list, vespene_geyser_list = self._get_resource_screen(unit_type, unit_density, player_relative, debug_output)
     count_mineral_source = len(mineral_field_list)    
     count_vespene_source = len(vespene_geyser_list)
     
@@ -720,7 +780,9 @@ class GeneralAgent(base_agent.BaseAgent):
     return candidate_point
 
 
-  def _execute_moving_camera(self, obs, camera_minimap):
+  def _execute_moving_camera(self, obs, camera_minimap, debug_func=None):
+    if debug_func is not None:
+      debug_func()
     if self._current_camera != camera_minimap:
       self._current_camera = camera_minimap
       return FUNCTIONS.move_camera(camera_minimap)
@@ -742,22 +804,167 @@ class GeneralAgent(base_agent.BaseAgent):
     #world_coordinate = self.calculate_world_absolute_coordinate((self._current_camera, center))
     #local_coordinate = self.calculate_local_coordinate(world_coordinate)
     #self._calculated_resource_region_list.append( [local_coordinate[0], None] )
-    self._get_resource_screen(obs, True)
-    self._calculated_resource_region_list.append( [self._current_camera, None] )
+    # 正在測試座標轉換函數，計算主堡最佳位置本身已除錯完成，現在會蓋不對的原因是：
+    # 在這裡預先算好 screen 座標，卻用座標轉換成另一個(camera, location)，到時候蓋就有誤差
+    # 如果在這裡不先算，只傳 camera，要蓋時再算location就會準確。
+    
+    #height_map = obs.observation.feature_screen.height_map
+    #if self._current_camera not in self._height_map_on_camera:
+    #  self._height_map_on_camera[self._current_camera] = numpy.array(height_map)
+    #  self._draw_debug_world_height_map('debug_world_height_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1]))
+    
+    townhall_best_location = self._calculate_townhall_best_location(obs, True)
+    world_coordinate = self.calculate_world_absolute_coordinate((self._current_camera, townhall_best_location))
+    local_coordinate = self.calculate_local_coordinate(world_coordinate)    
+    self._calculated_resource_region_list.append( [local_coordinate[0], local_coordinate[1]] )
+    #self._calculated_resource_region_list.append( [local_coordinate[0], None] )
+    
+    #self._calculated_resource_region_list.append( [local_coordinate[0], None] )    
+    #self._calculated_resource_region_list.append( [self._current_camera, None] )
     return self._execute_moving_camera(obs, next_camera)
     
     
   def _record_townhall_best_locations(self, obs):
     last_camera_minimap = self._current_camera
+    
+    resource_region_list = self._speculate_resource_regions()
+    self.resource_image = skimage_color.gray2rgb(numpy.zeros(self.MapShape, dtype=numpy.uint8))
+    holding_index = None
+    for i in range(len(resource_region_list)):
+      resource_region_camera = resource_region_list[i]
+      if self.FirstViewport[0][0]<resource_region_camera[0] and resource_region_camera[0]<self.FirstViewport[1][0] and self.FirstViewport[0][1]<resource_region_camera[1] and resource_region_camera[1]<self.FirstViewport[1][1]:
+        holding_index = i
+        break
+
+    if holding_index is not None:
+      referenced_coordinate = resource_region_list[holding_index]
+      self._speculated_resource_region_list.append(referenced_coordinate)
+      resource_region_list.pop(holding_index)
+      distace_square_values = []
+      for i in range(len(resource_region_list)):
+        distace_square_value = self.calculate_distance_square(referenced_coordinate, resource_region_list[i])
+        distace_square_values.append((distace_square_value, i))
+      for (distace_square_value, i) in sorted(distace_square_values):
+        self._speculated_resource_region_list.append(resource_region_list[i])
+
     for i in range(len(self._speculated_resource_region_list)-1, 0, -1):
       camera_minimap = self._speculated_resource_region_list[i]      
       self._schedule_job(camera_minimap, None, ['_record_townhall_best_location', self, [last_camera_minimap]], True)
-      for j in range(4):
-        self._schedule_job(camera_minimap, None, [FUNCTIONS.no_op.id, []], True)
       last_camera_minimap = camera_minimap
     return self._execute_moving_camera(obs, last_camera_minimap)
 
 
+  def _generate_world_height_map(self):
+    world_height_map = numpy.zeros(self.MapShape, dtype=numpy.uint8)
+    for camera_minimap in self._height_map_on_camera.keys():
+      height_map = self._height_map_on_camera[camera_minimap]
+      p = [self.AccumulatedOffset[i][camera_minimap[i]-self.CameraBoundary[0][i]] for i in range(2)]
+      (pixel_left, pixel_top) = tuple(p)
+      world_height_map[pixel_top:pixel_top+self.ScreenSize[1], pixel_left:pixel_left+self.ScreenSize[0]] = height_map[:,:]
+    return world_height_map
+
+      
+  def _draw_debug_world_height_map(self, filename='debug_world_height.png'):
+    txt_filename = 'debug_accumulate.json.txt'
+    with open(self.DEBUG_OUTPUT_PATH + '/%s' % txt_filename, "w") as outfile:
+      json.dump({'column_offset':self.AccumulatedOffset[0], 'row_offset':self.AccumulatedOffset[1]}, outfile)
+    world_height_image = skimage_color.gray2rgb(self._generate_world_height_map())
+    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, world_height_image)
+
+
+  def _draw_debug_world_resource(self, filename='debug_world_resource.png'):
+    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, self.resource_image)
+
+    
+  def _calculate_world_map(self, obs):
+    reserved_offset = (2, 2)
+    pixel_offset = [None, None]
+    for axis_index in range(2):
+      pixel_offset[axis_index] = [0] * (self.CameraBoundary[1][axis_index]-self.CameraBoundary[0][axis_index]+1)     
+      prepared_point = [list(self.CameraBoundary[1]), list(self.CameraBoundary[0])]
+      prepared_point[1][axis_index] += reserved_offset[axis_index]
+      matching_times = [self.ViewportSize[axis_index]+reserved_offset[axis_index], reserved_offset[axis_index]]
+      for z in range(2):
+        current_point = prepared_point[z]
+        current_height_map = self._height_map_on_camera[ tuple(current_point) ]
+        current_height_sum = current_height_map.sum(axis=axis_index, dtype=numpy.uint32)
+        for t in range(matching_times[z]):
+          previous_height_sum = current_height_sum
+          current_point[axis_index] -= 1
+          current_height_map = self._height_map_on_camera[ tuple(current_point) ]
+          current_height_sum = current_height_map.sum(axis=axis_index, dtype=numpy.uint32)
+          overlapped_length = 0
+          for current_start_index in range(self.ScreenSize[axis_index]):
+            perfect_overlapped = True
+            for line_count in range(self.ScreenSize[axis_index]-current_start_index):
+              if previous_height_sum[line_count] != current_height_sum[current_start_index+line_count]:
+                perfect_overlapped = False
+                break
+            if perfect_overlapped:
+              overlapped_length = current_start_index
+              break
+          pixel_offset[axis_index][current_point[axis_index]-self.CameraBoundary[0][axis_index]+1] = overlapped_length        
+      for k in range(self.CameraBoundary[1][axis_index]-self.ViewportSize[axis_index]-reserved_offset[axis_index], self.CameraBoundary[0][axis_index]+reserved_offset[axis_index], -1):
+        pixel_offset[axis_index][k-self.CameraBoundary[0][axis_index]] = pixel_offset[axis_index][k-self.CameraBoundary[0][axis_index]+self.ViewportSize[axis_index]]    
+      for k in range(1, len(pixel_offset[axis_index])):
+        pixel_offset[axis_index][k] += pixel_offset[axis_index][k-1]
+    self.AccumulatedOffset = pixel_offset
+
+    self.MapShape = (self.AccumulatedOffset[1][-1]+self.ScreenSize[1], self.AccumulatedOffset[0][-1]+self.ScreenSize[0])
+    self._draw_debug_world_height_map()
+
+  def _look_around_world(self, obs, scheduled_camera):
+    height_map = obs.observation.feature_screen.height_map
+    #self._draw_debug_camera_height(obs)
+    world_corner = (self.MinimapSize[0]-1,self.MinimapSize[1]-1)
+    next_camera = self._current_camera
+    if scheduled_camera is None:
+      scheduled_camera = [ self._current_camera, (0,0), world_corner ]
+      next_camera = scheduled_camera.pop()
+      self._schedule_job( next_camera , None, ['_look_around_world', self, [scheduled_camera]], True)
+    elif self._current_camera == world_corner:
+      camera = obs.observation.feature_minimap.camera
+      y, x = (camera == 1).nonzero()
+      viewport = ((x.min(),y.min()), (x.max(),y.max()))
+      self.CameraBoundary[1] = (viewport[0][0]+self.ViewportCenter[0]+1, viewport[0][1]+self.ViewportCenter[1]+1)
+      scheduled_camera.append(self.CameraBoundary[1])
+      for y in range(self.CameraBoundary[1][1]-(self.ViewportSize[1]+2), self.CameraBoundary[1][1]):
+        scheduled_camera.append( (self.CameraBoundary[1][0], y) )
+      for x in range(self.CameraBoundary[1][0]-(self.ViewportSize[0]+2), self.CameraBoundary[1][0]):
+        scheduled_camera.append( (x, self.CameraBoundary[1][1]) )
+      next_camera = scheduled_camera.pop()
+      self._schedule_job( next_camera , None, ['_look_around_world', self, [scheduled_camera]], True)      
+    elif self._current_camera == (0,0):
+      camera = obs.observation.feature_minimap.camera
+      y, x = (camera == 1).nonzero()
+      viewport = ((x.min(),y.min()), (x.max(),y.max()))
+      self.CameraBoundary[0] = (viewport[0][0]+self.ViewportCenter[0]-1, viewport[0][1]+self.ViewportCenter[1]-1)
+      scheduled_camera.append(self.CameraBoundary[0])      
+      for y in range(self.CameraBoundary[0][1]+2, self.CameraBoundary[0][1], -1):
+        scheduled_camera.append( (self.CameraBoundary[0][0], y) )
+      for x in range(self.CameraBoundary[0][0]+2, self.CameraBoundary[0][0], -1):
+        scheduled_camera.append( (x, self.CameraBoundary[0][1]) )
+      next_camera = scheduled_camera.pop()
+      self._schedule_job( next_camera , None, ['_look_around_world', self, [scheduled_camera]], True)
+    elif len(scheduled_camera) > 1:
+      self._height_map_on_camera[self._current_camera] = numpy.array(height_map)
+      image = skimage_color.gray2rgb(numpy.array(height_map, dtype=numpy.uint8))
+      filename = 'debug_height_%02d_%02d_.png' % (self._current_camera[0], self._current_camera[1])
+      skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, image)
+
+      next_camera = scheduled_camera.pop()
+      self._schedule_job( next_camera , None, ['_look_around_world', self, [scheduled_camera]], True)    
+    else:
+      self._height_map_on_camera[self._current_camera] = numpy.array(height_map)
+      image = skimage_color.gray2rgb(numpy.array(height_map, dtype=numpy.uint8))
+      filename = 'debug_height_%02d_%02d_.png' % (self._current_camera[0], self._current_camera[1])
+      skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, image)
+      
+      self._calculate_world_map(obs)
+      next_camera = scheduled_camera.pop()
+    return self._execute_moving_camera(obs, next_camera)
+      
+      
   def _test_build_townhall(self, obs, local_coordinate):
     townhall_mineral_cost = _UnitNumeric[self.TOWNHALL_TYPES[0]]['mineral_cost']
     camera_minimap = local_coordinate[0]
@@ -789,18 +996,22 @@ class GeneralAgent(base_agent.BaseAgent):
     return FUNCTIONS.no_op()
 
     
-  def _speculate_resource_regions(self, obs):
-    player_relative = obs.observation.feature_minimap.player_relative
-    NEIGHBOR_DISTANCE_SQURE = 8
-    grouped_points = self.aggregate_points(player_relative == features.PlayerRelative.NEUTRAL, NEIGHBOR_DISTANCE_SQURE)
+  def _speculate_resource_regions(self):
+    NEIGHBOR_DISTANCE_SQURE = self.ViewportSize[0]*self.ViewportSize[1]*9.0/64.0
+    grouped_points = self.aggregate_points((self.NeutralMinimap == features.PlayerRelative.NEUTRAL), NEIGHBOR_DISTANCE_SQURE)
     return_locs = []
     for exist_serial in grouped_points.keys():
       if len(grouped_points[exist_serial]) > 0:
         point_arr = numpy.array(list(grouped_points[exist_serial]))
         left, top = point_arr.min(axis=0)
         right, bottom = point_arr.max(axis=0)
-        center = (int(round((left+right)/2.0)), int(round((top+bottom)/2.0)) )
-        return_locs.append(center)
+        center = [ int(round((left+right)/2.0)), int(round((top+bottom)/2.0)) ]
+        for index in range(2):
+          if center[index] < self.CameraBoundary[0][index]:
+            center[index] = self.CameraBoundary[0][index]
+          elif center[index] > self.CameraBoundary[1][index]:
+            center[index] = self.CameraBoundary[1][index]
+        return_locs.append(tuple(center))
     return return_locs
 
 
@@ -986,65 +1197,47 @@ class GeneralAgent(base_agent.BaseAgent):
   def _game_start(self, obs):
     ready_function_call = FUNCTIONS.no_op()
     owner = obs.observation.player.player_id
-    townhall_location_list = self._get_my_townhall_screen(obs, True)
+    townhall_location_list = self._get_my_townhall_screen(obs, False)
     self._world_coordinate[owner] = {}
+
     if 1 == len(townhall_location_list):
-      resource_region_list = self._speculate_resource_regions(obs)
-      holding_index = None
-      for i in range(len(resource_region_list)):
-        resource_region_camera = resource_region_list[i]
-        if self.FirstViewport[0][0]<resource_region_camera[0] and resource_region_camera[0]<self.FirstViewport[1][0] and self.FirstViewport[0][1]<resource_region_camera[1] and resource_region_camera[1]<self.FirstViewport[1][1]:
-          holding_index = i
-          break
-      if holding_index is not None:
-        referenced_coordinate = resource_region_list[holding_index]
-        self._speculated_resource_region_list.append(referenced_coordinate)
-        resource_region_list.pop(holding_index)
-        distace_square_values = []
-        for i in range(len(resource_region_list)):
-          distace_square_value = self.calculate_distance_square(referenced_coordinate, resource_region_list[i])
-          distace_square_values.append((distace_square_value, i))
-        for (distace_square_value, i) in sorted(distace_square_values):
-          self._speculated_resource_region_list.append(resource_region_list[i])
-          
       unit_type_id = self.TOWNHALL_TYPES[0]
-      first_townhall = townhall_location_list[0]
-      townhall_location = first_townhall[0]
-      townhall_size = (first_townhall[2][0]-first_townhall[1][0], first_townhall[2][1]-first_townhall[1][1])
-      townhall_grid_length = self._get_grid_count_townhall()
+      townhall_location = townhall_location_list[0]
       
       #townhall_best_location = self._calculate_townhall_best_location(obs)
-      world_absolute_coordinate = self.calculate_world_absolute_coordinate((self._current_camera, townhall_location))
+      
+      #world_absolute_coordinate = self.calculate_world_absolute_coordinate((self._current_camera, townhall_location))
       self._calculated_resource_region_list.append( (self._current_camera, townhall_location) )
       self._occupied_resource_regions[self._current_camera] = {'owner':owner}
       self._holding_resource_region_list.append( (self._current_camera, townhall_location) )
-      self._world_coordinate[owner][unit_type_id] = [world_absolute_coordinate]
-      self._structures[world_absolute_coordinate] = {'owner':owner, 'unit_type':unit_type_id}
+      #self._world_coordinate[owner][unit_type_id] = [world_absolute_coordinate]
+      #self._structures[world_absolute_coordinate] = {'owner':owner, 'unit_type':unit_type_id}
       self._expected_selected = unit_type_id
       self._schedule_job(self._current_camera, unit_type_id, [FUNCTIONS.select_control_group.id, ['set', 0]])
       ready_function_call = FUNCTIONS.select_point('select', townhall_location)
     return ready_function_call
-
   
   def step(self, obs):
     if type(self) == GeneralAgent:
       return FUNCTIONS.no_op()
     else:
-      if self.CameraOffset is None:
+      if self.CameraBias is None:
         camera = obs.observation.feature_minimap.camera
         y, x = (camera == 1).nonzero()
         viewport = ((x.min(),y.min()), (x.max(),y.max()))
         if self.FirstViewport is None:
           self.FirstViewport = viewport
-          self.ViewportSize =  (self.FirstViewport[1][0]-self.FirstViewport[0][0], self.FirstViewport[1][1]-self.FirstViewport[0][1])
+          self.NeutralMinimap = numpy.array(obs.observation.feature_minimap.player_relative)
+          self.ViewportSize =  (self.FirstViewport[1][0]-self.FirstViewport[0][0]+1, self.FirstViewport[1][1]-self.FirstViewport[0][1]+1)
           screen_height_map = obs.observation.feature_screen.height_map
           self.ScreenSize = (screen_height_map.shape[1], screen_height_map.shape[0])
           minimap_height_map = obs.observation.feature_minimap.height_map
           self.MinimapSize = (minimap_height_map.shape[1], minimap_height_map.shape[0])
           self._current_camera = (int(math.floor((self.FirstViewport[0][0]+self.FirstViewport[1][0]+1)/2)), int(math.floor((self.FirstViewport[0][1]+self.FirstViewport[1][1]+1)/2)))
         else:
-          self.CameraOffset = ((viewport[0][0]-self.FirstViewport[0][0]), (viewport[0][1]-self.FirstViewport[0][1]))
-          self._current_camera = ((self._current_camera[0]-self.CameraOffset[0]), (self._current_camera[1]-self.CameraOffset[1]))
+          self.CameraBias = ((viewport[0][0]-self.FirstViewport[0][0]), (viewport[0][1]-self.FirstViewport[0][1]))
+          self._current_camera = ((self._current_camera[0]-self.CameraBias[0]), (self._current_camera[1]-self.CameraBias[1]))
+          self.ViewportCenter = (self._current_camera[0]-self.FirstViewport[0][0], self._current_camera[1]-self.FirstViewport[0][1])
           self._schedule_job(self._current_camera, None, ['_game_start', self, []])
         return FUNCTIONS.move_camera(self._current_camera)
       else:
@@ -1108,11 +1301,14 @@ class PracticeTerranAgent(GeneralAgent):
     ready_function_call = super(PracticeTerranAgent, self)._game_start(obs)
     townhall_location = self._holding_resource_region_list[0][1]
     self._schedule_job(self._current_camera, self.TOWNHALL_TYPES[0], ['_execute_training_worker_from_townhall', self, []])
+    self._schedule_job(self._current_camera, None, ['_look_around_world', self, [None]])
     self._schedule_job(self._current_camera, None, ['_record_townhall_best_locations', self, []])
     self._schedule_job(self._current_camera, None, ['_execute_training_worker_from_townhall', self, []])
     self._schedule_job(self._current_camera, None, ['_execute_training_worker_from_townhall', self, []])
     self._schedule_job(self._current_camera, None, ['_select_gathering_mineral_worker', self, [townhall_location]])
     self._schedule_job(self._current_camera, self.WORKER_TYPE, ['_walk_through_townhall_best_locations', self, []])
+    
+    
     return ready_function_call
 
   def do_step(self, obs):

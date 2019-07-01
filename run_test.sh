@@ -4,7 +4,7 @@ MAP=Simple64
 ### YearZero(紀年起源)
 # MAP=YearZero
 ### PortAleksander(亞歷克桑德港)
-MAP=PortAleksander
+# MAP=PortAleksander
 ### NewRepugnancy(新生衝突點)
 # MAP=NewRepugnancy
 ### KingsCove(國王海灣)
@@ -14,7 +14,7 @@ MAP=PortAleksander
 ### CyberForest(電子叢林)
 # MAP=CyberForest
 ### Automaton(自動化)
-# MAP=Automaton
+MAP=Automaton
 
 #AGENT1_CLS=pysc2.agents.yiren.idle_agent.IdleAgent1
 AGENT1_CLS=pysc2.agents.yiren.yiren_template.PracticeRandomRaceAgent
@@ -33,6 +33,7 @@ AGENT2_CLS=pysc2.agents.yiren.idle_agent.IdleAgent2
 #AGENT2_RACE=zerg
 AGENT2_RACE=random
 
-python3 -m pysc2.bin.agent --map ${MAP} --render True --save_replay True --agent ${AGENT1_CLS} --agent_race ${AGENT1_RACE} --agent2 ${AGENT2_CLS} --agent2_race ${AGENT2_RACE}
 mkdir -p ~yiren/Pictures/${MAP}
+rm -f ~yiren/Pictures/debug_* ~yiren/Pictures/${MAP}/debug_*
+python3 -m pysc2.bin.agent --game_steps_per_episode 36000 --map ${MAP} --render True --save_replay True --agent ${AGENT1_CLS} --agent_race ${AGENT1_RACE} --agent2 ${AGENT2_CLS} --agent2_race ${AGENT2_RACE}
 mv ~yiren/Pictures/debug_* ~yiren/Pictures/${MAP}/
