@@ -58,16 +58,19 @@ class GeneralAgent(base_agent.BaseAgent):
 
   def reset(self):
     # game constants, detected when the game starts
-    self.ViewportSize = (0, 0)
-    self.ViewportCenter = (0, 0)
+    self.ViewportSize = None
+    self.ViewportCenter = None
     self.ScreenSize = (0, 0)
     self.MinimapSize = (0, 0)
     self.FirstViewport = None
+    self.FirstCamera = None
     self.NeutralMinimap = None
-    self.FirstScreen = {}
-    self.AccumulatedOffset = [[0], [0]]    
+    self.FirstScreen = [{}, {}]
+    self.AccumulatedOffset = [[0], [0]]
     self.CameraBoundary = [ None, None ]
     self.MinimapAnchor = [[], []]
+    self.OriginAnchorIndex = None
+    self.AnchorDistance = (2, 2)
     self.MapOffset = [{}, {}]
     self.MapShape = (0, 0)
     # useful hidden states
@@ -1016,6 +1019,50 @@ class GeneralAgent(base_agent.BaseAgent):
     self._schedule_job( next_camera , None, ['_record_townhall_best_location', self, [scheduled_camera]], True)
     return self._execute_moving_camera(obs, next_camera)
 
+  def _generate_partial_height_map(self, custom_camera_boundary):
+    map_shape = [0, 0]
+    for axis_index in range(2):
+      accumulated_offset = 0
+      current_anchor = custom_camera_boundary[1][axis_index]
+      while current_anchor > custom_camera_boundary[0][axis_index]:
+        next_anchors = self.MapOffset[axis_index][current_anchor].keys()
+        if len(next_anchors) == 0:
+          break
+        previous_anchor = current_anchor
+        current_anchor = min(next_anchors)
+        accumulated_offset += self.MapOffset[axis_index][previous_anchor][current_anchor]
+      map_shape[1-axis_index] = accumulated_offset
+    pixel_offset = [{}, {}]
+    for axis_index in range(2):
+      anchor_list = numpy.array(sorted(self.MapOffset[axis_index].keys()))
+      valid_anchors = anchor_list[numpy.logical_and((anchor_list>custom_camera_boundary[0][axis_index]), (anchor_list<=custom_camera_boundary[1][axis_index]))]
+      pixel_offset[axis_index][custom_camera_boundary[1][axis_index]] = map_shape[1-axis_index]
+      for anchor in reversed(valid_anchors):
+        if anchor in pixel_offset[axis_index] and anchor in self.MapOffset[axis_index]:
+          for next_anchor in self.MapOffset[axis_index][anchor].keys():
+            if next_anchor not in pixel_offset[axis_index]:
+              pixel_offset[axis_index][next_anchor] = pixel_offset[axis_index][anchor]-self.MapOffset[axis_index][anchor][next_anchor]
+    #txt_filename = 'debug_partial_accumulate.json.txt'
+    #with open(self.DEBUG_OUTPUT_PATH + '/%s' % txt_filename, "w") as outfile:
+    #  json.dump({'column_offset':pixel_offset[0], 'row_offset':pixel_offset[1]}, outfile)
+
+    map_shape = (map_shape[0]+self.ScreenSize[1], map_shape[1]+self.ScreenSize[0])
+    partial_height_map = numpy.zeros(map_shape, dtype=numpy.uint8)
+    for vertical_anchor in sorted(pixel_offset[1].keys()):
+      pixel_top = pixel_offset[1][vertical_anchor]
+      for horizontal_anchor in sorted(pixel_offset[0].keys()):
+        pixel_left = pixel_offset[0][horizontal_anchor]
+        camera_minimap = (horizontal_anchor, vertical_anchor)
+        if camera_minimap in self._height_map_on_camera:
+          height_map = self._height_map_on_camera[camera_minimap]
+          partial_height_map[pixel_top:pixel_top+self.ScreenSize[1], pixel_left:pixel_left+self.ScreenSize[0]] = height_map[:,:]
+    return [partial_height_map, pixel_offset]
+
+  def _draw_debug_partial_height_map(self, custom_camera_boundary, filename='debug_partial_height.png'):
+    height_map, pixel_offset = self._generate_partial_height_map(custom_camera_boundary)
+    partial_height_image = skimage_color.gray2rgb(height_map)
+    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, partial_height_image)
+
 
   def _generate_aerial_view_height_map(self):
     world_height_map = numpy.zeros(self.MapShape, dtype=numpy.uint8)
@@ -1101,51 +1148,158 @@ class GeneralAgent(base_agent.BaseAgent):
     return offset
 
 
-  def _make_aerial_view(self, obs, scheduled_camera=None):
+  def _decide_origin_anchor(self, minimap_height_map):
+    if  self.OriginAnchorIndex is not None:
+      return
     (HORIZONTAL, VERTICAL) = range(2)
-    #CAMERA_OFFSET = (numpy.array(self.ViewportSize) - (1,1)) // 2
-    #CAMERA_OFFSET = (self.ViewportSize[HORIZONTAL]-1 if self.ViewportSize[HORIZONTAL]>1 else 1, self.ViewportSize[VERTICAL]-1 if self.ViewportSize[VERTICAL]>1 else 1)
-    CAMERA_OFFSET = (self.ViewportSize[HORIZONTAL]-2 if self.ViewportSize[HORIZONTAL]>2 else 2, self.ViewportSize[VERTICAL]-2 if self.ViewportSize[VERTICAL]>2 else 2)
+    ANCHOR_DISTANCE = self.AnchorDistance
+    for axis_index in range(2):
+      axis_anchor_list = deque()
+      middle_anchor = (self.CameraBoundary[1][axis_index]+self.CameraBoundary[0][axis_index])//2
+      for anchor_point in range(middle_anchor, self.CameraBoundary[1][axis_index], ANCHOR_DISTANCE[axis_index]):
+        axis_anchor_list.append(int(anchor_point))
+      axis_anchor_list.append(self.CameraBoundary[1][axis_index])
+      for anchor_point in range(middle_anchor-ANCHOR_DISTANCE[axis_index], self.CameraBoundary[0][axis_index], -ANCHOR_DISTANCE[axis_index]):
+        axis_anchor_list.appendleft(int(anchor_point))
+      axis_anchor_list.appendleft(self.CameraBoundary[0][axis_index])
+      self.MinimapAnchor[axis_index] = list(axis_anchor_list)
+      for anchor_point in self.MinimapAnchor[axis_index]:
+        self.MapOffset[axis_index][anchor_point] = {}
+    anchor_shape = (len(self.MinimapAnchor[1]), len(self.MinimapAnchor[0]))
+
+    entropy = numpy.zeros(shape=anchor_shape)
+    for vertical_index in range(anchor_shape[0]):
+      vertical_anchor = self.MinimapAnchor[1][vertical_index]
+      for horizontal_index in range(anchor_shape[1]):
+        horizontal_anchor = self.MinimapAnchor[0][horizontal_index]
+        camera_minimap = (horizontal_anchor, vertical_anchor)
+        (left, top) = numpy.array(camera_minimap) - numpy.array(self.ViewportCenter)
+        (right, bottom) = numpy.array(self.ViewportSize) + (left, top)
+        thumbnail = minimap_height_map[top:bottom, left:right]
+        entropy[vertical_index, horizontal_index] = self._calculate_entropy(thumbnail.flatten())
+    self.OriginAnchorIndex = tuple([entropy.sum(axis=i).argmax() for i in range(2)])
+    # max_entropy_anchor = [self.MinimapAnchor[i][self.OriginAnchorIndex[i]] for i in range(2)]
+
+
+  def _calculate_map_offset(self):
+    (HORIZONTAL, VERTICAL) = range(2)
+    anchor_index_vector = [-1, -1]
+    for axis_index in range(2):
+      for anchor_index in range(len(self.MinimapAnchor[axis_index])-1, -1, -1):
+        if self._current_camera[axis_index] >= self.MinimapAnchor[axis_index][anchor_index]:
+          anchor_index_vector[axis_index] = anchor_index
+          break
+    if anchor_index_vector[HORIZONTAL]>-1 and anchor_index_vector[VERTICAL]>-1:
+      for axis_index in range(2):
+        last_camera = list(self._current_camera)
+        if anchor_index_vector[axis_index]>0:
+          if self._current_camera[axis_index] > self.MinimapAnchor[axis_index][anchor_index_vector[axis_index]]:
+            last_camera[axis_index] = self.MinimapAnchor[axis_index][anchor_index_vector[axis_index]]
+          else:
+            last_camera[axis_index] = self.MinimapAnchor[axis_index][anchor_index_vector[axis_index]-1]
+          last_camera = tuple(last_camera)
+          if last_camera in self._height_map_on_camera:
+            current_point = last_camera
+            prepared_point = self._current_camera
+            offset = self._calculate_aerial_view_matching(axis_index, prepared_point, current_point)
+            if offset is not None:
+              if prepared_point[axis_index] not in self.MapOffset[axis_index]:
+                self.MapOffset[axis_index][prepared_point[axis_index]] = {}
+              self.MapOffset[axis_index][prepared_point[axis_index]][current_point[axis_index]] = offset
+        last_camera = list(self._current_camera)
+        if anchor_index_vector[axis_index]<len(self.MinimapAnchor[axis_index])-1:
+          last_camera[axis_index] = self.MinimapAnchor[axis_index][anchor_index_vector[axis_index]+1]
+          last_camera = tuple(last_camera)
+          if last_camera in self._height_map_on_camera:
+            current_point = self._current_camera
+            prepared_point = last_camera
+            offset = self._calculate_aerial_view_matching(axis_index, prepared_point, current_point)
+            if offset is not None:
+              if prepared_point[axis_index] not in self.MapOffset[axis_index]:
+                self.MapOffset[axis_index][prepared_point[axis_index]] = {}
+              self.MapOffset[axis_index][prepared_point[axis_index]][current_point[axis_index]] = offset
+
+
+  def _prepare_aerial_view(self, obs, scheduled_camera=None):
+    (HORIZONTAL, VERTICAL) = range(2)
+    ANCHOR_DISTANCE = self.AnchorDistance
     if scheduled_camera is not None:
       height_map = obs.observation.feature_screen.height_map
       if self._current_camera not in self._height_map_on_camera:
         self._height_map_on_camera[self._current_camera] = numpy.array(height_map)
       if len(scheduled_camera) >= 1:
-        anchor_index_vector = [-1, -1]
-        for direction in range(2):
-          for anchor_index in range(len(self.MinimapAnchor[direction])-1, -1, -1):
-            if self._current_camera[direction] >= self.MinimapAnchor[direction][anchor_index]:
-              anchor_index_vector[direction] = anchor_index
-              break
-        if anchor_index_vector[HORIZONTAL]>-1 and anchor_index_vector[VERTICAL]>-1:
-          axis_index, prepared_point, current_point = None, None, None
-          for direction in range(2):
-            last_camera = list(self._current_camera)
-            if anchor_index_vector[direction]>0:
-              last_camera[direction] = self.MinimapAnchor[direction][anchor_index_vector[direction]-1]
-              last_camera = tuple(last_camera)
-              if last_camera in self._height_map_on_camera:
-                axis_index = direction
-                current_point = last_camera
-                prepared_point = self._current_camera
-                offset = self._calculate_aerial_view_matching(axis_index, prepared_point, current_point)
-                if offset is not None:
-                  if prepared_point[axis_index] not in self.MapOffset[axis_index]:
-                    self.MapOffset[axis_index][prepared_point[axis_index]] = {}
-                  self.MapOffset[axis_index][prepared_point[axis_index]][current_point[axis_index]] = offset                                
-            last_camera = list(self._current_camera)
-            if anchor_index_vector[direction]<len(self.MinimapAnchor[direction])-1:
-              last_camera[direction] = self.MinimapAnchor[direction][anchor_index_vector[direction]+1]
-              last_camera = tuple(last_camera)
-              if last_camera in self._height_map_on_camera:
-                axis_index = direction
-                current_point = self._current_camera
-                prepared_point = last_camera
-                offset = self._calculate_aerial_view_matching(axis_index, prepared_point, current_point)
-                if offset is not None:
-                  if prepared_point[axis_index] not in self.MapOffset[axis_index]:
-                    self.MapOffset[axis_index][prepared_point[axis_index]] = {}
-                  self.MapOffset[axis_index][prepared_point[axis_index]][current_point[axis_index]] = offset                                
+        self._calculate_map_offset()
+        next_camera = scheduled_camera.pop()
+        if len(scheduled_camera) > 0:
+          self._schedule_job( next_camera , None, ['_prepare_aerial_view', self, [scheduled_camera]], True)
+        else:
+          FIRST_CAMERA = (self.FirstViewport[0][0]+self.ViewportCenter[0], self.FirstViewport[0][1]+self.ViewportCenter[1])
+          txt_filename = 'debug_prepare_aerial_view_%02d_%02d.json.txt' % (FIRST_CAMERA[0], FIRST_CAMERA[1])
+          with open(self.DEBUG_OUTPUT_PATH + '/%s' % txt_filename, "w") as outfile:
+            json.dump({'minimap_anchor': self.MinimapAnchor,
+                       'looked':list(self._height_map_on_camera.keys()),
+                       'minimap_offset': self.MapOffset,
+                      }, outfile, sort_keys=True)
+    else:
+      minimap_height_map = numpy.array(obs.observation.feature_minimap.height_map)
+      filename='debug_aerial_minimap.png'
+      height_map_image = skimage_color.gray2rgb(minimap_height_map)
+      skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, height_map_image)
+      self._decide_origin_anchor(minimap_height_map)
+      max_entropy_anchor = [self.MinimapAnchor[i][self.OriginAnchorIndex[i]] for i in range(2)]
+      extend_axis_anchor_list = [None, None]
+      for axis_index in range(2):
+        lower_anchor = self._current_camera[axis_index]-ANCHOR_DISTANCE[axis_index]
+        if lower_anchor < self.CameraBoundary[0][axis_index]:
+          lower_anchor = self.CameraBoundary[0][axis_index]
+        upper_anchor = self._current_camera[axis_index]+ANCHOR_DISTANCE[axis_index]
+        if upper_anchor > self.CameraBoundary[1][axis_index]:
+          upper_anchor = self.CameraBoundary[1][axis_index]
+        anchor_list = numpy.array(self.MinimapAnchor[axis_index])
+        lower_index = numpy.argwhere(anchor_list>lower_anchor).min()
+        upper_index = numpy.argwhere(anchor_list<upper_anchor).max()
+        selected_anchors = deque(self.MinimapAnchor[axis_index][lower_index-1:upper_index+2])
+        for anchor in [upper_anchor, self._current_camera[axis_index], lower_anchor]:
+          if anchor not in selected_anchors:
+            selected_anchors.appendleft(anchor)
+        extend_axis_anchor_list[axis_index] = list(selected_anchors)
+      practical_minimap_size = numpy.array(self.CameraBoundary[1])-numpy.array(self.CameraBoundary[0]) + numpy.array([1,1])
+      if practical_minimap_size[HORIZONTAL]>=practical_minimap_size[VERTICAL]:
+        long_axis = HORIZONTAL
+        short_axis = VERTICAL
+      else:
+        long_axis = VERTICAL
+        short_axis = HORIZONTAL
+      practical_camera_queue = deque()
+      for long_axis_anchor in extend_axis_anchor_list[long_axis]:
+        point = [None, None]
+        point[long_axis] = long_axis_anchor
+        point[short_axis] = max_entropy_anchor[short_axis]
+        point = tuple(point)
+        if point not in self._height_map_on_camera:
+          practical_camera_queue.append(point)
+      for short_axis_anchor in extend_axis_anchor_list[short_axis]:
+        point = [None, None]
+        point[long_axis] = max_entropy_anchor[long_axis]
+        point[short_axis] = short_axis_anchor
+        point = tuple(point)
+        if point not in self._height_map_on_camera:
+          practical_camera_queue.append(point)
+      scheduled_camera = [self._current_camera] + list(practical_camera_queue)
+      next_camera = scheduled_camera.pop()
+      self._schedule_job( next_camera , None, ['_prepare_aerial_view', self, [scheduled_camera]], True)
+    return self._execute_moving_camera(obs, next_camera)
+
+
+  def _make_aerial_view(self, obs, scheduled_camera=None):
+    (HORIZONTAL, VERTICAL) = range(2)
+    ANCHOR_DISTANCE = self.AnchorDistance
+    if scheduled_camera is not None:
+      height_map = obs.observation.feature_screen.height_map
+      if self._current_camera not in self._height_map_on_camera:
+        self._height_map_on_camera[self._current_camera] = numpy.array(height_map)
+      if len(scheduled_camera) >= 1:
+        self._calculate_map_offset()
         next_camera = scheduled_camera.pop()
         if len(scheduled_camera) > 0:
           self._schedule_job( next_camera , None, ['_make_aerial_view', self, [scheduled_camera]], True)
@@ -1182,7 +1336,7 @@ class GeneralAgent(base_agent.BaseAgent):
                 self.AccumulatedOffset[axis_index][anchor-self.CameraBoundary[0][axis_index]] = remaining_length-offset
               offset = self.MapOffset[axis_index][previous_anchor][current_anchor]
               remaining_length -= offset
-          txt_filename = 'debug_accumulated_offset.json.txt' 
+          txt_filename = 'debug_accumulated_offset.json.txt'
           with open(self.DEBUG_OUTPUT_PATH + '/%s' % txt_filename, "w") as outfile:
             json.dump({'map_shape': self.MapShape,
                        'accumulated_x': { index+self.CameraBoundary[0][0]:self.AccumulatedOffset[0][index] for index in range(len(self.AccumulatedOffset[0]))},
@@ -1190,107 +1344,102 @@ class GeneralAgent(base_agent.BaseAgent):
                        'minimap_anchor': self.MinimapAnchor
                       }, outfile, sort_keys=True)
           self._draw_debug_aerial_view_height_map()
+          self._draw_debug_world_height_map()
     else:
       minimap_height_map = numpy.array(obs.observation.feature_minimap.height_map)
-      filename='debug_aerial_minimap.png'
-      height_map_image = skimage_color.gray2rgb(minimap_height_map)
-      skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, height_map_image)
+      self._decide_origin_anchor(minimap_height_map)
+      max_entropy_anchor = [self.MinimapAnchor[i][self.OriginAnchorIndex[i]] for i in range(2)]
+      extend_axis_anchor_list = self.MinimapAnchor
       practical_minimap_size = numpy.array(self.CameraBoundary[1])-numpy.array(self.CameraBoundary[0]) + numpy.array([1,1])
-      for axis_index in range(2):
-        axis_anchor_list = deque()
-        middle_anchor = (self.CameraBoundary[1][axis_index]+self.CameraBoundary[0][axis_index])//2
-        for anchor_point in range(middle_anchor, self.CameraBoundary[1][axis_index], CAMERA_OFFSET[axis_index]):
-          axis_anchor_list.append(int(anchor_point))
-        axis_anchor_list.append(self.CameraBoundary[1][axis_index])
-        for anchor_point in range(middle_anchor-CAMERA_OFFSET[axis_index], self.CameraBoundary[0][axis_index], -CAMERA_OFFSET[axis_index]):
-          axis_anchor_list.appendleft(int(anchor_point))
-        axis_anchor_list.appendleft(self.CameraBoundary[0][axis_index])
-        self.MinimapAnchor[axis_index] = list(axis_anchor_list)
-        for anchor_point in self.MinimapAnchor[axis_index]:
-          self.MapOffset[axis_index][anchor_point] = {}          
-      anchor_shape = (len(self.MinimapAnchor[1]), len(self.MinimapAnchor[0]))
-      
-      entropy = numpy.zeros(shape=anchor_shape)
-      for vertical_index in range(anchor_shape[0]):
-        vertical_anchor = self.MinimapAnchor[1][vertical_index]
-        for horizontal_index in range(anchor_shape[1]):
-          horizontal_anchor = self.MinimapAnchor[0][horizontal_index]
-          camera_minimap = (horizontal_anchor, vertical_anchor)
-          (left, top) = numpy.array(camera_minimap) - numpy.array(self.ViewportCenter)
-          (right, bottom) = numpy.array(self.ViewportSize) + (left, top)          
-          thumbnail = minimap_height_map[top:bottom, left:right]          
-          entropy[vertical_index, horizontal_index] = self._calculate_entropy(thumbnail.flatten())
-      #txt_filename = 'debug_minimap_entropy.json.txt'
-      #with open(self.DEBUG_OUTPUT_PATH + '/%s' % txt_filename, "w") as outfile:
-      #  json.dump({'entropy':entropy.tolist()}, outfile)
-      max_entropy_anchor = [self.MinimapAnchor[i][entropy.sum(axis=i).argmax()] for i in range(2)]
       if practical_minimap_size[HORIZONTAL]>=practical_minimap_size[VERTICAL]:
         long_axis = HORIZONTAL
         short_axis = VERTICAL
       else:
         long_axis = VERTICAL
         short_axis = HORIZONTAL
-
-      extend_axis_anchor_list = [None, None]
-      for axis_index in range(2):
-        added_new_anchor = False
-        extend_axis_anchor_list[axis_index] = self.MinimapAnchor[axis_index][:]
-        anchor = int(self._current_camera[axis_index]-CAMERA_OFFSET[axis_index])
-        if anchor > self.CameraBoundary[0][axis_index] and anchor not in extend_axis_anchor_list[axis_index]:
-          extend_axis_anchor_list[axis_index].append(anchor)
-          added_new_anchor = True
-        if self._current_camera[axis_index] not in extend_axis_anchor_list[axis_index]:
-          extend_axis_anchor_list[axis_index].append(self._current_camera[axis_index])
-          added_new_anchor = True
-        anchor = int(self._current_camera[axis_index]+CAMERA_OFFSET[axis_index])
-        if anchor < self.CameraBoundary[1][axis_index] and anchor not in extend_axis_anchor_list[axis_index]:
-          extend_axis_anchor_list[axis_index].append(anchor)
-          added_new_anchor = True
-        if added_new_anchor:
-          extend_axis_anchor_list[axis_index].sort()
-
       practical_camera_queue = deque()
       for long_axis_anchor in extend_axis_anchor_list[long_axis]:
-        if long_axis_anchor == max_entropy_anchor[long_axis]:
-          continue
         point = [None, None]
         point[long_axis] = long_axis_anchor
         point[short_axis] = max_entropy_anchor[short_axis]
-        practical_camera_queue.append( tuple(point) )
+        point = tuple(point)
+        if point not in self._height_map_on_camera:
+          practical_camera_queue.append(point)
       for short_axis_anchor in extend_axis_anchor_list[short_axis]:
         point = [None, None]
         point[long_axis] = max_entropy_anchor[long_axis]
         point[short_axis] = short_axis_anchor
-        practical_camera_queue.append( tuple(point) )
+        point = tuple(point)
+        if point not in self._height_map_on_camera:
+          practical_camera_queue.append(point)
       scheduled_camera = [self._current_camera] + list(practical_camera_queue)
       #txt_filename = 'debug_aerial_view_schedule.json.txt'
       #with open(self.DEBUG_OUTPUT_PATH + '/%s' % txt_filename, "w") as outfile:
       #  json.dump({'scheduled_camera': scheduled_camera
       #            }, outfile, indent=2, sort_keys=True)
-      next_camera = scheduled_camera.pop()      
+      next_camera = scheduled_camera.pop()
       self._schedule_job( next_camera , None, ['_make_aerial_view', self, [scheduled_camera]], True)
     return self._execute_moving_camera(obs, next_camera)
 
 
   def _look_around_world_corner(self, obs, scheduled_camera=None):
-    if scheduled_camera is None:
-      world_corner = (self.MinimapSize[0]-1,self.MinimapSize[1]-1)
-      scheduled_camera = [ self._current_camera, (0,0), world_corner ]
-      next_camera = scheduled_camera.pop()
-      self._schedule_job( next_camera , None, ['_look_around_world_corner', self, [scheduled_camera]], True)
+    if scheduled_camera is not None:
+      if len(scheduled_camera) > 0:
+        next_camera = scheduled_camera.pop()
+        camera = obs.observation.feature_minimap.camera
+        y, x = (camera == 1).nonzero()
+        viewport = ((int(x.min()),int(y.min())), (int(x.max()),int(y.max())))
+        if next_camera == (0, 0):
+          self.CameraBoundary[1] = (viewport[0][0]+self.ViewportCenter[0]+1, viewport[0][1]+self.ViewportCenter[1]+1)
+        else:
+          self.CameraBoundary[0] = (viewport[0][0]+self.ViewportCenter[0]-1, viewport[0][1]+self.ViewportCenter[1]-1)
+          for axis_index in range(2):
+            self.AccumulatedOffset[axis_index] = [0] + [None] * (self.CameraBoundary[1][axis_index]-self.CameraBoundary[0][axis_index])
+        if len(scheduled_camera) > 0:
+          self._schedule_job(next_camera, None, ['_look_around_world_corner', self, [scheduled_camera]], True)
     else:
-      next_camera = scheduled_camera.pop()
-      camera = obs.observation.feature_minimap.camera
-      y, x = (camera == 1).nonzero()
-      viewport = ((int(x.min()),int(y.min())), (int(x.max()),int(y.max())))
-      if self._current_camera == (0, 0):
-        self.CameraBoundary[0] = (viewport[0][0]+self.ViewportCenter[0]-1, viewport[0][1]+self.ViewportCenter[1]-1)        
-        for axis_index in range(2):
-          self.AccumulatedOffset[axis_index] = [0] + [None] * (self.CameraBoundary[1][axis_index]-self.CameraBoundary[0][axis_index])
-      else:
-        self.CameraBoundary[1] = (viewport[0][0]+self.ViewportCenter[0]+1, viewport[0][1]+self.ViewportCenter[1]+1)
-        self._schedule_job( next_camera , None, ['_look_around_world_corner', self, [scheduled_camera]], True)
+      world_corner = (self.MinimapSize[0]-1,self.MinimapSize[1]-1)
+      scheduled_camera = [self._current_camera, (0,0)]
+      next_camera = world_corner
+      self._schedule_job(next_camera, None, ['_look_around_world_corner', self, [scheduled_camera]], True)
     return self._execute_moving_camera(obs, next_camera)
+
+
+  def _draw_debug_surrounding(self, camera_minimap, custom_camera_boundary):
+    SCREEN_SHAPE = (self.ScreenSize[1], self.ScreenSize[0])
+    neutral_region = self._neutral_regions[camera_minimap]
+    townhall_location = neutral_region['townhall'][0]
+    mineral_field_list = neutral_region['mineral']
+    vespene_geyser_list = neutral_region['vespene']
+    (partial_height_map, pixel_offset) = self._generate_partial_height_map(custom_camera_boundary)
+    partial_height_map_image = skimage_color.gray2rgb(partial_height_map)
+    townhall_image = skimage_color.gray2rgb(self.FirstScreen[1]['height_map'])
+    origin = numpy.array([pixel_offset[0][camera_minimap[0]], pixel_offset[1][camera_minimap[1]]])
+
+    txt_filename = 'debug_surrounding_shape.json.txt'
+    with open(self.DEBUG_OUTPUT_PATH + '/%s' % txt_filename, "w") as outfile:
+      json.dump({'shape':partial_height_map.shape, 'origin':origin.tolist(), 'townhall':townhall_location}, outfile)
+
+    townhall_mask = self.create_circle_mask(SCREEN_SHAPE, townhall_location, 9**2+3**2)
+    townhall_image[townhall_mask] = (170, 170, 0)
+    townhall_image[townhall_location[1]-1:townhall_location[1]+2, townhall_location[0]-1:townhall_location[0]+2] = (255, 255, 0)
+
+    density = numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8)
+    for center in mineral_field_list:
+      circle_mask = self.create_mineral_circle_mask(SCREEN_SHAPE, center)
+      density[circle_mask] += 1
+    for d in range(1, 5):
+      townhall_image[(density==d)] = (0, 0, d*32+95)
+
+    density = numpy.zeros(SCREEN_SHAPE, dtype=numpy.uint8)
+    for center in vespene_geyser_list:
+      circle_mask = self.create_circle_mask(SCREEN_SHAPE, center, 5**2+2**2)
+      density[circle_mask] += 1
+    for d in range(1, 5):
+      townhall_image[(density==d)] = (0, d*32+95, 0)
+    partial_height_map_image[origin[1]:origin[1]+self.ScreenSize[1], origin[0]:origin[0]+self.ScreenSize[0]] = townhall_image[:,:]
+    filename = 'debug_surrounding_%02d_%02d.png' % (camera_minimap[0], camera_minimap[1])
+    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, partial_height_map_image)
 
 
   def _look_around_surrounding(self, obs, scheduled_camera=None):
@@ -1298,31 +1447,49 @@ class GeneralAgent(base_agent.BaseAgent):
     if self._current_camera not in self._height_map_on_camera:
       self._height_map_on_camera[self._current_camera] = numpy.array(height_map)
     (HORIZONTAL, VERTICAL) = range(2)
-    #CAMERA_OFFSET = (numpy.array(self.ViewportSize) - (1,1)) // 2
-    #CAMERA_OFFSET = (self.ViewportSize[HORIZONTAL]-1 if self.ViewportSize[HORIZONTAL]>1 else 1, self.ViewportSize[VERTICAL]-1 if self.ViewportSize[VERTICAL]>1 else 1)
-    CAMERA_OFFSET = (self.ViewportSize[HORIZONTAL]-2 if self.ViewportSize[HORIZONTAL]>2 else 2, self.ViewportSize[VERTICAL]-2 if self.ViewportSize[VERTICAL]>2 else 2)
+    ANCHOR_DISTANCE = self.AnchorDistance
     if scheduled_camera is not None:
       if len(scheduled_camera) >= 1:
         next_camera = scheduled_camera.pop()
         if len(scheduled_camera)>0:
           self._schedule_job( next_camera , None, ['_look_around_surrounding', self, [scheduled_camera]], True)
         else:
-          unit_type = self.FirstScreen['unit_type']
-          unit_density = self.FirstScreen['unit_density']
-          player_relative = self.FirstScreen['player_relative']
+          unit_type = self.FirstScreen[1]['unit_type']
+          unit_density = self.FirstScreen[1]['unit_density']
+          player_relative = self.FirstScreen[1]['player_relative']
           mineral_field_list, vespene_geyser_list = self._get_resource_screen(unit_type, unit_density, player_relative, False)
           self._neutral_regions[next_camera]['mineral'] = mineral_field_list
           self._neutral_regions[next_camera]['vespene'] = vespene_geyser_list
-          self._draw_debug_world_height_map()
+          #self._draw_debug_world_height_map()
+          if True:
+            custom_camera_bondary = [list(next_camera), list(next_camera)]
+            if next_camera[HORIZONTAL]>self.CameraBoundary[0][HORIZONTAL]:
+              custom_camera_bondary[0][HORIZONTAL] -= ANCHOR_DISTANCE[HORIZONTAL]
+            if next_camera[HORIZONTAL]<self.CameraBoundary[1][HORIZONTAL]:
+              custom_camera_bondary[1][HORIZONTAL] += ANCHOR_DISTANCE[HORIZONTAL]
+            if next_camera[VERTICAL]>self.CameraBoundary[0][VERTICAL]:
+              custom_camera_bondary[0][VERTICAL] -= ANCHOR_DISTANCE[HORIZONTAL]
+            if next_camera[VERTICAL]<self.CameraBoundary[1][VERTICAL]:
+              custom_camera_bondary[1][VERTICAL] += ANCHOR_DISTANCE[HORIZONTAL]
+            for axis_index in range(2):
+              if custom_camera_bondary[0][axis_index] < self.CameraBoundary[0][axis_index]:
+                custom_camera_bondary[0][axis_index] = self.CameraBoundary[0][axis_index]
+              elif custom_camera_bondary[1][axis_index] > self.CameraBoundary[1][axis_index]:
+                custom_camera_bondary[1][axis_index] = self.CameraBoundary[1][axis_index]
+            #  anchor_list = numpy.array(self.MinimapAnchor[axis_index])
+            #  custom_camera_bondary[1][axis_index] = int(anchor_list[(anchor_list>=custom_camera_bondary[1][axis_index])].min())
+            self._draw_debug_surrounding(next_camera, custom_camera_bondary)
+            filename='debug_partial_height_%02d_%02d.png' % next_camera
+            self._draw_debug_partial_height_map(custom_camera_bondary, filename)
     else:
       minimap_offset = [[], []]
-      if self._current_camera[HORIZONTAL]-CAMERA_OFFSET[HORIZONTAL]>self.CameraBoundary[0][HORIZONTAL]:
+      if self._current_camera[HORIZONTAL]>self.CameraBoundary[0][HORIZONTAL]:
         minimap_offset[HORIZONTAL].append( numpy.array([-1, 0]) )
-      if self._current_camera[HORIZONTAL]+CAMERA_OFFSET[HORIZONTAL]<self.CameraBoundary[1][HORIZONTAL]:
+      if self._current_camera[HORIZONTAL]<self.CameraBoundary[1][HORIZONTAL]:
         minimap_offset[HORIZONTAL].append( numpy.array([1, 0]) )
-      if self._current_camera[VERTICAL]-CAMERA_OFFSET[VERTICAL]>self.CameraBoundary[0][VERTICAL]:
+      if self._current_camera[VERTICAL]>self.CameraBoundary[0][VERTICAL]:
         minimap_offset[VERTICAL].append( numpy.array([0, -1]) )
-      if self._current_camera[VERTICAL]+CAMERA_OFFSET[VERTICAL]<self.CameraBoundary[1][VERTICAL]:
+      if self._current_camera[VERTICAL]<self.CameraBoundary[1][VERTICAL]:
         minimap_offset[VERTICAL].append( numpy.array([0, 1]) )
       count_direction = [ len(minimap_offset[axis_index]) for axis_index in range(2) ]
       for axis_index in range(2):
@@ -1354,7 +1521,12 @@ class GeneralAgent(base_agent.BaseAgent):
       sequence.reverse()
       scheduled_camera = [self._current_camera]
       for offset_vector in sequence:
-        camera_minimap = (offset_vector * CAMERA_OFFSET) + self._current_camera
+        camera_minimap = (offset_vector * ANCHOR_DISTANCE) + self._current_camera
+        for axis_index in range(2):
+          if camera_minimap[axis_index] < self.CameraBoundary[0][axis_index]:
+            camera_minimap[axis_index] = self.CameraBoundary[0][axis_index]
+          elif camera_minimap[axis_index] > self.CameraBoundary[1][axis_index]:
+            camera_minimap[axis_index] = self.CameraBoundary[1][axis_index]
         scheduled_camera.append(tuple(camera_minimap.tolist()))
       next_camera = scheduled_camera.pop()
       self._schedule_job( next_camera , None, ['_look_around_surrounding', self, [scheduled_camera]], True)
@@ -1563,10 +1735,10 @@ class GeneralAgent(base_agent.BaseAgent):
     # 檢查新建築是否完成
     # 檢查科技是否升級完成
     ready_function_call = FUNCTIONS.no_op()
+
     if self._current_camera is not None:
       if self._current_camera in self._scheduled_actions_on_unit:
         scheduled_actions_on_unit = self._scheduled_actions_on_unit[self._current_camera]
-
         if self._expected_selected is not None:
           really_selected = False
           count_multi_select = len(obs.observation.multi_select)
@@ -1588,6 +1760,44 @@ class GeneralAgent(base_agent.BaseAgent):
 
   def _game_start(self, obs):
     ready_function_call = FUNCTIONS.no_op()
+
+    screen_height_map = numpy.array(obs.observation.feature_screen.height_map)
+    unit_type = numpy.array(obs.observation.feature_screen.unit_type)
+    unit_density = numpy.array(obs.observation.feature_screen.unit_density)
+    player_relative = numpy.array(obs.observation.feature_screen.player_relative)
+    self.FirstScreen[1]['unit_type'] = unit_type
+    self.FirstScreen[1]['unit_density'] = unit_density
+    self.FirstScreen[1]['player_relative'] = player_relative
+    self.FirstScreen[1]['height_map'] = screen_height_map
+
+    if True:
+      camera = obs.observation.feature_minimap.camera
+      y, x = (camera == 1).nonzero()
+      viewport = ((int(x.min()),int(y.min())), (int(x.max()),int(y.max())))
+      txt_filename = 'debug_game_start_%02d_%02d.json.txt' % (self._current_camera[0], self._current_camera[1])
+      with open(self.DEBUG_OUTPUT_PATH + '/%s' % txt_filename, "w") as outfile:
+        json.dump({'viewport_size':self.ViewportSize, 'viewport_center:':self.ViewportCenter, 'viewport':viewport,
+                   'first_viewport':self.FirstViewport
+                  }, outfile)
+      fig0, (ax1, ax2) = plt.subplots(ncols=2, nrows=1, sharex=True, sharey=True, figsize=(4, 2))
+      image1 = skimage_color.gray2rgb(self.FirstScreen[0]['height_map'])
+      ax1.imshow(image1)
+      image2 = skimage_color.gray2rgb(self.FirstScreen[1]['height_map'])
+      ax2.imshow(image2)
+      filename = 'debug_compare_first_height_map_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
+      fig0.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
+      plt.close(fig0)
+      fig0, (ax1, ax2) = plt.subplots(ncols=2, nrows=1, sharex=True, sharey=True, figsize=(4, 2))
+      image1 = skimage_color.gray2rgb(self.FirstScreen[0]['unit_density'])
+      self.set_color_in_density_image(image1, self.FirstScreen[0]['unit_density'])
+      ax1.imshow(image1)
+      image2 = skimage_color.gray2rgb(self.FirstScreen[1]['unit_density'])
+      self.set_color_in_density_image(image2, self.FirstScreen[1]['unit_density'])
+      ax2.imshow(image2)
+      filename = 'debug_compare_first_unit_density_%02d_%02d.png' % (self._current_camera[0], self._current_camera[1])
+      fig0.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
+      plt.close(fig0)
+
     owner = obs.observation.player.player_id
     townhall_location_list = self._get_my_townhall_screen(obs, False)
     self._world_coordinate[owner] = {}
@@ -1599,40 +1809,49 @@ class GeneralAgent(base_agent.BaseAgent):
       #townhall_best_location = self._calculate_townhall_best_location(obs)
 
       #world_absolute_coordinate = self.calculate_world_absolute_coordinate((self._current_camera, townhall_location))
-      self._calculated_resource_region_list.append( (self._current_camera, townhall_location) )
-      self._occupied_resource_regions[self._current_camera] = {'owner':owner}
-      self._holding_resource_region_list.append( (self._current_camera, townhall_location) )
-      self._neutral_regions[self._current_camera] = {'townhall': [townhall_location]}
-      self._shifted_camera_for_townhall[self._current_camera] = self._current_camera
-      self._ordered_regions.append(self._current_camera)
+      if True:
+        self._calculated_resource_region_list.append( (self._current_camera, townhall_location) )
+        self._occupied_resource_regions[self._current_camera] = {'owner':owner}
+        self._holding_resource_region_list.append( (self._current_camera, townhall_location) )
+        self._neutral_regions[self._current_camera] = {'townhall': [townhall_location]}
+        self._shifted_camera_for_townhall[self._current_camera] = self._current_camera
+        self._ordered_regions.append(self._current_camera)
       #self._world_coordinate[owner][unit_type_id] = [world_absolute_coordinate]
       #self._structures[world_absolute_coordinate] = {'owner':owner, 'unit_type':unit_type_id}
+
       self._expected_selected = unit_type_id
       self._schedule_job(self._current_camera, unit_type_id, [FUNCTIONS.select_control_group.id, ['set', 0]])
       ready_function_call = FUNCTIONS.select_point('select', townhall_location)
     return ready_function_call
 
+
   def step(self, obs):
     if type(self) == GeneralAgent:
       return FUNCTIONS.no_op()
     elif self.FirstViewport is None:
-      height_map = numpy.array(obs.observation.feature_screen.height_map)
       camera = obs.observation.feature_minimap.camera
       y, x = (camera == 1).nonzero()
-      self.FirstViewport = ((int(x.min()),int(y.min())), (int(x.max()),int(y.max())))
+      viewport = ((int(x.min()),int(y.min())), (int(x.max()),int(y.max())))
+      screen_height_map = numpy.array(obs.observation.feature_screen.height_map)
+      unit_type = numpy.array(obs.observation.feature_screen.unit_type)
+      unit_density = numpy.array(obs.observation.feature_screen.unit_density)
+      player_relative = numpy.array(obs.observation.feature_screen.player_relative)
+      self.FirstScreen[0]['unit_type'] = unit_type
+      self.FirstScreen[0]['unit_density'] = unit_density
+      self.FirstScreen[0]['player_relative'] = player_relative
+      self.FirstScreen[0]['height_map'] = screen_height_map
+      self.FirstViewport = viewport
       self.NeutralMinimap = numpy.array(obs.observation.feature_minimap.player_relative)
-      self.FirstScreen['unit_type'] = numpy.array(obs.observation.feature_screen.unit_type)
-      self.FirstScreen['unit_density'] = numpy.array(obs.observation.feature_screen.unit_density)
-      self.FirstScreen['player_relative'] = numpy.array(obs.observation.feature_screen.player_relative)
-      self.FirstScreen['height_map'] = height_map
       self.ViewportSize = (self.FirstViewport[1][0]-self.FirstViewport[0][0]+1, self.FirstViewport[1][1]-self.FirstViewport[0][1]+1)
-      self.ViewportCenter = ((self.FirstViewport[1][0]-self.FirstViewport[0][0])//2, (self.FirstViewport[1][1]-self.FirstViewport[0][1])//2)
-      screen_height_map = obs.observation.feature_screen.height_map
+      self.ViewportCenter = ((self.ViewportSize[0]+1)//2, (self.ViewportSize[1]+1)//2)
+      self.AnchorDistance = (self.ViewportSize[0]-2 if self.ViewportSize[0]>2 else 2, self.ViewportSize[1]-2 if self.ViewportSize[1]>2 else 2)
       self.ScreenSize = (screen_height_map.shape[1], screen_height_map.shape[0])
       minimap_height_map = obs.observation.feature_minimap.height_map
       self.MinimapSize = (minimap_height_map.shape[1], minimap_height_map.shape[0])
-      self._current_camera = (int(math.floor((self.FirstViewport[0][0]+self.FirstViewport[1][0])/2)), int(math.floor((self.FirstViewport[0][1]+self.FirstViewport[1][1])/2)))
-      return self._game_start(obs)
+      #self._current_camera = ((viewport[0][0]+viewport[1][0]+1)//2, (viewport[0][1]+viewport[1][1]+1)//2)
+      next_camera = (viewport[0][0]+self.ViewportCenter[0], viewport[0][1]+self.ViewportCenter[1])
+      self._schedule_job(next_camera, None, ['_game_start', self, []])
+      return self._execute_moving_camera(obs, next_camera)
     return self._main_step(obs)
 
 
@@ -1695,8 +1914,9 @@ class PracticeTerranAgent(GeneralAgent):
     townhall_location = self._holding_resource_region_list[0][1]
     self._schedule_job(self._current_camera, self.TOWNHALL_TYPES[0], ['_execute_training_worker_from_townhall', self, []])
     self._schedule_job(self._current_camera, None, ['_look_around_world_corner', self, []])
-    self._schedule_job(self._current_camera, None, ['_make_aerial_view', self, []])
+    self._schedule_job(self._current_camera, None, ['_prepare_aerial_view', self, []])
     self._schedule_job(self._current_camera, None, ['_look_around_surrounding', self, []])
+    #self._schedule_job(self._current_camera, None, ['_make_aerial_view', self, []])
 
     #self._schedule_job(self._current_camera, None, ['_record_townhall_best_locations', self, []])
     #self._schedule_job(self._current_camera, None, ['_execute_training_worker_from_townhall', self, []])
