@@ -73,6 +73,7 @@ class GeneralAgent(base_agent.BaseAgent):
     self.AnchorDistance = (2, 2)
     self.MapOffset = [{}, {}]
     self.MapShape = (0, 0)
+    self.MapAltitudeRange = (0, 255)
     # useful hidden states
     self._current_camera = None
     self._expected_selected = None
@@ -1058,10 +1059,24 @@ class GeneralAgent(base_agent.BaseAgent):
           partial_height_map[pixel_top:pixel_top+self.ScreenSize[1], pixel_left:pixel_left+self.ScreenSize[0]] = height_map[:,:]
     return [partial_height_map, pixel_offset]
 
+
+  def _slice_generated_partial_height_map(self, partial_height_map, pixel_offset, custom_camera_boundary):
+    pixel_left = pixel_offset[0][custom_camera_boundary[0][0]]
+    pixel_top = pixel_offset[1][custom_camera_boundary[0][1]]
+    pixel_right = pixel_offset[0][custom_camera_boundary[1][0]] + self.ScreenSize[0]
+    pixel_bottom = pixel_offset[1][custom_camera_boundary[1][1]] + self.ScreenSize[1]
+    return partial_height_map[pixel_top:pixel_bottom, pixel_left:pixel_right]
+
+
+  def _generate_sliced_partial_height_map(self, custom_camera_boundary):
+    partial_height_map, pixel_offset = self._generate_partial_height_map(custom_camera_boundary)
+    return self._slice_generated_partial_height_map(partial_height_map, pixel_offset, custom_camera_boundary)
+
+
   def _draw_debug_partial_height_map(self, custom_camera_boundary, filename='debug_partial_height.png'):
-    height_map, pixel_offset = self._generate_partial_height_map(custom_camera_boundary)
-    partial_height_image = skimage_color.gray2rgb(height_map)
-    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, partial_height_image)
+    height_map = self._generate_sliced_partial_height_map(custom_camera_boundary)
+    height_image = skimage_color.gray2rgb(height_map)
+    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, height_image)
 
 
   def _generate_aerial_view_height_map(self):
@@ -1411,7 +1426,7 @@ class GeneralAgent(base_agent.BaseAgent):
     townhall_location = neutral_region['townhall'][0]
     mineral_field_list = neutral_region['mineral']
     vespene_geyser_list = neutral_region['vespene']
-    (partial_height_map, pixel_offset) = self._generate_partial_height_map(custom_camera_boundary)
+    partial_height_map, pixel_offset = self._generate_partial_height_map(custom_camera_boundary)
     partial_height_map_image = skimage_color.gray2rgb(partial_height_map)
     townhall_image = skimage_color.gray2rgb(self.FirstScreen[1]['height_map'])
     origin = numpy.array([pixel_offset[0][camera_minimap[0]], pixel_offset[1][camera_minimap[1]]])
@@ -1439,7 +1454,48 @@ class GeneralAgent(base_agent.BaseAgent):
       townhall_image[(density==d)] = (0, d*32+95, 0)
     partial_height_map_image[origin[1]:origin[1]+self.ScreenSize[1], origin[0]:origin[0]+self.ScreenSize[0]] = townhall_image[:,:]
     filename = 'debug_surrounding_%02d_%02d.png' % (camera_minimap[0], camera_minimap[1])
-    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, partial_height_map_image)
+    sliced_image = self._slice_generated_partial_height_map(partial_height_map_image, pixel_offset, custom_camera_boundary)
+    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, sliced_image)
+
+
+  def _test_calculate_scarp(self, custom_camera_boundary):
+    # TODO: 使用 _generate_sliced_partial_height_map 的傳回高度圖
+    # 計算牆，出口(路徑)
+    altitude, pixel_offset = self._generate_partial_height_map(custom_camera_boundary)
+    sliced_altitude = self._slice_generated_partial_height_map(altitude, pixel_offset, custom_camera_boundary)
+    MAP_ALTITUDE_RANGE = self.MapAltitudeRange[1]-self.MapAltitudeRange[0]
+    threshold = 0.03
+    scarp_mask = numpy.full(sliced_altitude.shape, False)
+    for axis_index in range(2):
+      # axis=0, 沿著y軸做, 緃向相減(下減上)
+      # axis=1, 沿著x軸做, 橫向相減(右減左)
+      altitude_difference = numpy.array(sliced_altitude, dtype=numpy.float64)
+      altitude_difference = abs(numpy.diff(altitude_difference, axis=axis_index))
+      altitude_difference = altitude_difference / MAP_ALTITUDE_RANGE
+      padding_shape = list(sliced_altitude.shape)
+      padding_shape[axis_index] = 1
+      zeros = numpy.zeros ( tuple(padding_shape) )
+      axis_scarp_mask = numpy.full(sliced_altitude.shape, False)
+      complement = [None, None]
+      complement[0] = numpy.concatenate( (altitude_difference, zeros), axis=axis_index)
+      complement[1] = numpy.concatenate( (zeros, altitude_difference), axis=axis_index)
+      fig0, (ax1, ax2) = plt.subplots(ncols=2, nrows=1, sharex=True, sharey=True, figsize=(4, 2))
+      image1 = skimage_color.gray2rgb(sliced_altitude)
+      image1[(complement[0]>threshold)] = (255, 0, 0)
+      ax1.imshow(image1)
+      image2 = skimage_color.gray2rgb(sliced_altitude)
+      image2[(complement[1]>threshold)] = (255, 0, 0)
+      ax2.imshow(image2)
+      filename = 'debug_calculate_scarp_axis%d.png' % (axis_index, )
+      fig0.savefig(self.DEBUG_OUTPUT_PATH + '/%s' % filename)
+      plt.close(fig0)
+      for c in complement:
+        axis_scarp_mask = numpy.logical_or(axis_scarp_mask, (c>threshold))
+      scarp_mask = numpy.logical_or(scarp_mask, axis_scarp_mask)
+    sliced_image = skimage_color.gray2rgb(sliced_altitude)
+    sliced_image[scarp_mask] = (255, 0, 0)
+    filename = 'debug_calculate_scarp.png'
+    skimage_io.imsave(self.DEBUG_OUTPUT_PATH + '/%s' % filename, sliced_image)
 
 
   def _look_around_surrounding(self, obs, scheduled_camera=None):
@@ -1460,27 +1516,25 @@ class GeneralAgent(base_agent.BaseAgent):
           mineral_field_list, vespene_geyser_list = self._get_resource_screen(unit_type, unit_density, player_relative, False)
           self._neutral_regions[next_camera]['mineral'] = mineral_field_list
           self._neutral_regions[next_camera]['vespene'] = vespene_geyser_list
-          #self._draw_debug_world_height_map()
           if True:
-            custom_camera_bondary = [list(next_camera), list(next_camera)]
+            custom_camera_boundary = [list(next_camera), list(next_camera)]
             if next_camera[HORIZONTAL]>self.CameraBoundary[0][HORIZONTAL]:
-              custom_camera_bondary[0][HORIZONTAL] -= ANCHOR_DISTANCE[HORIZONTAL]
+              custom_camera_boundary[0][HORIZONTAL] -= ANCHOR_DISTANCE[HORIZONTAL]
             if next_camera[HORIZONTAL]<self.CameraBoundary[1][HORIZONTAL]:
-              custom_camera_bondary[1][HORIZONTAL] += ANCHOR_DISTANCE[HORIZONTAL]
+              custom_camera_boundary[1][HORIZONTAL] += ANCHOR_DISTANCE[HORIZONTAL]
             if next_camera[VERTICAL]>self.CameraBoundary[0][VERTICAL]:
-              custom_camera_bondary[0][VERTICAL] -= ANCHOR_DISTANCE[HORIZONTAL]
+              custom_camera_boundary[0][VERTICAL] -= ANCHOR_DISTANCE[HORIZONTAL]
             if next_camera[VERTICAL]<self.CameraBoundary[1][VERTICAL]:
-              custom_camera_bondary[1][VERTICAL] += ANCHOR_DISTANCE[HORIZONTAL]
+              custom_camera_boundary[1][VERTICAL] += ANCHOR_DISTANCE[HORIZONTAL]
             for axis_index in range(2):
-              if custom_camera_bondary[0][axis_index] < self.CameraBoundary[0][axis_index]:
-                custom_camera_bondary[0][axis_index] = self.CameraBoundary[0][axis_index]
-              elif custom_camera_bondary[1][axis_index] > self.CameraBoundary[1][axis_index]:
-                custom_camera_bondary[1][axis_index] = self.CameraBoundary[1][axis_index]
-            #  anchor_list = numpy.array(self.MinimapAnchor[axis_index])
-            #  custom_camera_bondary[1][axis_index] = int(anchor_list[(anchor_list>=custom_camera_bondary[1][axis_index])].min())
-            self._draw_debug_surrounding(next_camera, custom_camera_bondary)
+              if custom_camera_boundary[0][axis_index] < self.CameraBoundary[0][axis_index]:
+                custom_camera_boundary[0][axis_index] = self.CameraBoundary[0][axis_index]
+              elif custom_camera_boundary[1][axis_index] > self.CameraBoundary[1][axis_index]:
+                custom_camera_boundary[1][axis_index] = self.CameraBoundary[1][axis_index]
+            self._draw_debug_surrounding(next_camera, custom_camera_boundary)
             filename='debug_partial_height_%02d_%02d.png' % next_camera
-            self._draw_debug_partial_height_map(custom_camera_bondary, filename)
+            self._draw_debug_partial_height_map(custom_camera_boundary, filename)
+          self._test_calculate_scarp(custom_camera_boundary)
     else:
       minimap_offset = [[], []]
       if self._current_camera[HORIZONTAL]>self.CameraBoundary[0][HORIZONTAL]:
@@ -1848,7 +1902,7 @@ class GeneralAgent(base_agent.BaseAgent):
       self.ScreenSize = (screen_height_map.shape[1], screen_height_map.shape[0])
       minimap_height_map = obs.observation.feature_minimap.height_map
       self.MinimapSize = (minimap_height_map.shape[1], minimap_height_map.shape[0])
-      #self._current_camera = ((viewport[0][0]+viewport[1][0]+1)//2, (viewport[0][1]+viewport[1][1]+1)//2)
+      self.MapAltitudeRange = (int(minimap_height_map.min()), int(minimap_height_map.max()))
       next_camera = (viewport[0][0]+self.ViewportCenter[0], viewport[0][1]+self.ViewportCenter[1])
       self._schedule_job(next_camera, None, ['_game_start', self, []])
       return self._execute_moving_camera(obs, next_camera)
